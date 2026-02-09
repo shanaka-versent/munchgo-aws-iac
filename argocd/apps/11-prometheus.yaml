@@ -1,0 +1,96 @@
+# ArgoCD App: Prometheus + Grafana (kube-prometheus-stack)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: 11 (after Istio mesh policies and MunchGo services)
+#
+# Deploys the kube-prometheus-stack via Helm:
+# - Prometheus server (scrapes Istio metrics + MunchGo /actuator/prometheus)
+# - Grafana (pre-built Istio dashboards + custom MunchGo dashboards)
+# - AlertManager (optional alerting)
+# - Node Exporter, kube-state-metrics (cluster metrics)
+#
+# Istio Integration:
+# - Prometheus scrapes Istio control plane (istiod) metrics
+# - Prometheus scrapes ztunnel/waypoint proxy metrics
+# - Grafana includes Istio mesh, service, workload dashboards
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 65.8.1
+    helm:
+      releaseName: prometheus
+      values: |
+        # Grafana
+        grafana:
+          enabled: true
+          adminPassword: admin  # Change in production
+          service:
+            type: ClusterIP
+          sidecar:
+            dashboards:
+              enabled: true
+              searchNamespace: ALL
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+
+        # Prometheus
+        prometheus:
+          prometheusSpec:
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            retention: 7d
+            storageSpec: {}  # In-memory for POC (use PVC in production)
+            tolerations:
+              - key: CriticalAddonsOnly
+                operator: Exists
+                effect: NoSchedule
+            # Scrape Istio control plane
+            additionalScrapeConfigs:
+              - job_name: 'istiod'
+                kubernetes_sd_configs:
+                  - role: endpoints
+                    namespaces:
+                      names: ['istio-system']
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+                    action: keep
+                    regex: istiod;http-monitoring
+
+        # AlertManager
+        alertmanager:
+          enabled: false  # Enable in production
+
+        # Node Exporter
+        nodeExporter:
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

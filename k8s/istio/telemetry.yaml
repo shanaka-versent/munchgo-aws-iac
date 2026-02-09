@@ -1,0 +1,30 @@
+# Istio Ambient Mesh - Telemetry Configuration for MunchGo
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+#
+# Configures Istio telemetry for the munchgo namespace:
+# - Distributed tracing via Jaeger (100% sampling in dev, reduce in prod)
+# - Metrics export to Prometheus
+# - Access logging for debugging
+#
+# Telemetry flows through the waypoint proxy for L7 visibility.
+
+---
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: munchgo-telemetry
+  namespace: munchgo
+spec:
+  tracing:
+    - providers:
+        - name: jaeger
+      randomSamplingPercentage: 100  # 100% for dev; reduce to 1-10% for prod
+  metrics:
+    - providers:
+        - name: prometheus
+  accessLogging:
+    - providers:
+        - name: envoy
+      disabled: false

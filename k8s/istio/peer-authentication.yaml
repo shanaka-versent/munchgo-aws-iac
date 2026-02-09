@@ -1,0 +1,25 @@
+# Istio Ambient Mesh - PeerAuthentication for MunchGo
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+#
+# Enforces STRICT mTLS for all east-west traffic in the munchgo namespace.
+# With Istio Ambient mesh, mTLS is provided by ztunnel (L4 proxy DaemonSet)
+# without sidecar injection. This policy ensures that:
+#
+# 1. All pod-to-pod communication within munchgo is encrypted (mTLS)
+# 2. Plaintext connections between pods are rejected
+# 3. Service identities are cryptographically verified (SPIFFE IDs)
+#
+# Note: Traffic to external services (MSK Kafka, RDS PostgreSQL) is NOT
+# affected by this policy — it only applies to mesh-internal traffic.
+
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: munchgo-strict-mtls
+  namespace: munchgo
+spec:
+  mtls:
+    mode: STRICT

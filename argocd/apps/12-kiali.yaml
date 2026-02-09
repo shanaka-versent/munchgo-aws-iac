@@ -1,0 +1,67 @@
+# ArgoCD App: Kiali - Istio Service Mesh Dashboard
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: 12 (after Prometheus is deployed - Kiali needs metrics)
+#
+# Kiali provides:
+# - Service mesh topology visualization (MunchGo service graph)
+# - East-west traffic flow monitoring between microservices
+# - Istio configuration validation (AuthorizationPolicies, waypoints)
+# - Health and performance dashboards
+# - Distributed tracing integration (via Jaeger)
+#
+# Access: kubectl port-forward svc/kiali -n observability 20001:20001
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kiali
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "12"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://kiali.org/helm-charts
+    chart: kiali-server
+    targetRevision: 2.2.0
+    helm:
+      releaseName: kiali
+      values: |
+        auth:
+          strategy: anonymous  # Use openid for production
+        deployment:
+          accessible_namespaces:
+            - "**"
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+        external_services:
+          prometheus:
+            url: "http://prometheus-kube-prometheus-prometheus.observability:9090"
+          grafana:
+            enabled: true
+            in_cluster_url: "http://prometheus-grafana.observability:80"
+            url: ""
+          tracing:
+            enabled: true
+            in_cluster_url: "http://jaeger-query.observability:16686"
+            use_grpc: false
+        server:
+          web_fqdn: ""
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

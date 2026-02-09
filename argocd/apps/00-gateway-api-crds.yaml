@@ -1,0 +1,38 @@
+# ArgoCD App: Gateway API CRDs
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: -2 (before Istio base CRDs)
+#
+# Kubernetes Gateway API is a modern, role-oriented replacement for Ingress.
+# These CRDs must be installed before Istio so it can serve as the Gateway API implementation.
+# https://gateway-api.sigs.k8s.io/
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gateway-api-crds
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Official Gateway API CRDs from Kubernetes SIGs
+    repoURL: https://github.com/kubernetes-sigs/gateway-api.git
+    targetRevision: v1.2.0
+    path: config/crd/standard
+
+  destination:
+    server: https://kubernetes.default.svc
+
+  syncPolicy:
+    automated:
+      prune: false  # Don't prune CRDs - they may be used by other resources
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true  # Required for CRDs
+      - Replace=true          # Replace CRDs on update

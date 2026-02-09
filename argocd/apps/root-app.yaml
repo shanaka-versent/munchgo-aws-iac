@@ -1,0 +1,57 @@
+# ArgoCD Root Application (App of Apps Pattern)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# This root application manages all child applications in this repo.
+# Bootstrapped automatically by Terraform via the argocd-apps Helm chart.
+# Manual apply is only needed if Terraform bootstrap is skipped:
+#   kubectl apply -f argocd/apps/root-app.yaml
+#
+# Architecture Layers:
+# ====================
+# Layer 1: Cloud Infrastructure (Terraform) — VPC, Subnets, NAT, IGW
+# Layer 2: Kubernetes Cluster (Terraform)   — EKS, Node Groups, IAM, ArgoCD, LB Controller
+# Layer 3: EKS Customizations (ArgoCD)      — THIS REPO manages Layer 3
+# Layer 4: Application Deployment (ArgoCD)  — DELEGATED to munchgo-k8s-config repo
+#
+# Layer 3 (this repo — argocd/apps/):
+#   - Gateway API CRDs, Istio Ambient Mesh (base, istiod, cni, ztunnel)
+#   - Namespaces with ambient labels
+#   - Istio Gateway and HTTPRoutes
+#   - External Secrets Operator + config
+#   - Istio mesh policies (waypoint, AuthZ, PeerAuth, telemetry)
+#   - Observability stack (Prometheus, Kiali, Jaeger)
+#   - Health Responder (platform service for Kong health checks)
+#
+# Layer 4 (munchgo-k8s-config repo, via 09-munchgo-apps.yaml bridge):
+#   - MunchGo Microservices (6 services, each an ArgoCD Application)
+#   - CI/CD updates image tags in overlays/ — ArgoCD auto-syncs
+#
+# Kong Cloud Gateway runs externally in Kong's managed infrastructure.
+# It connects to the single Istio Gateway NLB via Transit Gateway.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloud-gateway-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shanaka-versent/munchgo-aws-iac.git
+    targetRevision: HEAD
+    path: argocd/apps
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true

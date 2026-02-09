@@ -1,0 +1,71 @@
+# ArgoCD App: Jaeger - Distributed Tracing
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: 12 (parallel with Kiali, after Prometheus)
+#
+# Jaeger provides distributed tracing for MunchGo microservices:
+# - Trace propagation across service boundaries (via Istio waypoint proxy)
+# - Latency analysis for the order saga flow
+# - Dependency analysis between microservices
+# - Root cause analysis for failures
+#
+# Storage: In-memory for dev (use Elasticsearch/Cassandra for production)
+#
+# Istio integration: The Telemetry resource in k8s/istio/telemetry.yaml
+# configures Istio to send traces to Jaeger.
+#
+# Access: kubectl port-forward svc/jaeger-query -n observability 16686:16686
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jaeger
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "12"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://jaegertracing.github.io/helm-charts
+    chart: jaeger
+    targetRevision: 3.3.1
+    helm:
+      releaseName: jaeger
+      values: |
+        provisionDataStore:
+          cassandra: false
+          elasticsearch: false
+        allInOne:
+          enabled: true
+          image:
+            tag: "1.76.0"
+          extraEnv:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+        storage:
+          type: memory
+        agent:
+          enabled: false
+        collector:
+          enabled: false
+        query:
+          enabled: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

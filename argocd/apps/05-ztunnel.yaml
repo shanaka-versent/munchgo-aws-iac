@@ -1,0 +1,43 @@
+# ArgoCD App: ztunnel (Ambient Mesh L4 mTLS Proxy)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: 0 (with istiod and cni)
+#
+# ztunnel is a per-node L4 proxy that provides automatic mTLS encryption
+# for all pod-to-pod traffic in Ambient mesh namespaces.
+# No sidecar injection needed - ztunnel runs as a DaemonSet.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ztunnel
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://istio-release.storage.googleapis.com/charts
+    chart: ztunnel
+    targetRevision: 1.24.0
+    helm:
+      releaseName: ztunnel
+      values: |
+        # ztunnel runs on all nodes (DaemonSet) - needs toleration for system nodes
+        tolerations:
+          - key: CriticalAddonsOnly
+            operator: Exists
+            effect: NoSchedule
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

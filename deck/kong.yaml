@@ -1,0 +1,400 @@
+# Kong Konnect Cloud Gateway -- MunchGo Microservices Configuration (decK)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# This file defines routes, services, and plugins for the
+# Kong Dedicated Cloud Gateway managed by Konnect.
+#
+# IMPORTANT: All services point to the SINGLE Istio Gateway internal NLB.
+# Run ./scripts/03-post-terraform-setup.sh to get the NLB DNS name.
+# Replace k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com with the actual NLB hostname.
+#
+# Architecture:
+#   Kong Cloud GW --[Transit GW]--> Internal NLB --> Istio Gateway --> HTTPRoute --> Pod
+#   All services share the same upstream NLB. Path-based routing is handled
+#   by both Kong (L7 plugins) and Istio Gateway (HTTPRoutes) in the cluster.
+#
+# MunchGo API Endpoints:
+#   /api/v1/auth         → Auth Service (public — login, register, token refresh)
+#   /api/v1/consumers    → Consumer Service (Cognito OIDC protected)
+#   /api/v1/restaurants  → Restaurant Service (Cognito OIDC + anonymous guest browsing)
+#   /api/v1/orders       → Order Service (Cognito OIDC protected, CQRS)
+#   /api/v1/couriers     → Courier Service (Cognito OIDC protected)
+#   /healthz             → Health Responder (platform health check)
+#
+# Authentication (Amazon Cognito + Kong OpenID Connect):
+#   Auth Service registers users in Cognito and returns Cognito tokens.
+#   Kong validates Cognito JWTs via the openid-connect plugin using
+#   JWKS auto-discovery (automatic key rotation, no manual key updates).
+#   Validated user claims are forwarded as upstream headers.
+#
+# After Cognito Terraform apply, update https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v with:
+#   terraform output cognito_issuer_url
+#
+# Apply with:
+#   deck gateway sync -s deck/kong.yaml \
+#     --konnect-addr https://au.api.konghq.com \
+#     --konnect-token $KONNECT_TOKEN \
+#     --konnect-control-plane-name kong-cloud-gateway-eks
+
+_format_version: "3.0"
+
+# ==============================================================================
+# GLOBAL PLUGINS
+# ==============================================================================
+
+# plugins:
+  # --------------------------------------------------------------------------
+  # CloudFront Bypass Prevention -- Custom Origin Header (Optional)
+  # --------------------------------------------------------------------------
+  # NOTE: If you're using origin mTLS (recommended), this plugin is OPTIONAL.
+  # mTLS alone prevents bypass at the TLS layer (Kong rejects connections
+  # without a valid client certificate). This header adds defense-in-depth
+  # at the application layer.
+  #
+  # To enable:
+  # 1. Uncomment the plugin below
+  # 2. Replace <YOUR_CF_ORIGIN_SECRET> with the same value used in
+  #    terraform.tfvars for cf_origin_header_value
+  # 3. Sync: deck gateway sync -s deck/kong.yaml ...
+  #
+  # - name: pre-function
+  #   config:
+  #     access:
+  #       - |
+  #         local cf_secret = kong.request.get_header("X-CF-Secret")
+  #         if cf_secret ~= "<YOUR_CF_ORIGIN_SECRET>" then
+  #           return kong.response.exit(403, { message = "Direct access not allowed" })
+  #         end
+
+# ==============================================================================
+# SERVICES & ROUTES — MunchGo Microservices
+# ==============================================================================
+# All services point to the SINGLE Istio Gateway internal NLB.
+# Kong sends traffic to this NLB with the original path preserved.
+# Istio Gateway uses HTTPRoutes to route to the correct backend pod.
+#
+# Replace k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com with the Istio Gateway NLB hostname from:
+#   kubectl get gateway -n istio-ingress kong-cloud-gw-gateway \
+#     -o jsonpath='{.status.addresses[0].value}'
+
+services:
+  # --------------------------------------------------------------------------
+  # Auth Service — Public (login, register, token refresh)
+  # --------------------------------------------------------------------------
+  # No OIDC plugin — this endpoint is public for authentication flows.
+  # Auth service proxies to Cognito for user registration and login,
+  # then returns Cognito tokens to the client.
+  - name: munchgo-auth
+    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    protocol: http
+    port: 80
+    routes:
+      - name: auth-route
+        paths:
+          - /api/v1/auth
+        strip_path: false
+        protocols:
+          - https
+          - http
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          max_age: 3600
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Kong-Proxy: true"
+              - "X-Request-Source: cloud-gateway"
+
+  # --------------------------------------------------------------------------
+  # Consumer Service — Cognito OIDC Protected
+  # --------------------------------------------------------------------------
+  - name: munchgo-consumers
+    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    protocol: http
+    port: 80
+    routes:
+      - name: consumers-route
+        paths:
+          - /api/v1/consumers
+        strip_path: false
+        protocols:
+          - https
+          - http
+    plugins:
+      - name: openid-connect
+        config:
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          auth_methods:
+            - bearer
+          bearer_token_param_type:
+            - header
+          cache_ttl: 300
+          upstream_headers_claims:
+            - sub
+            - email
+            - custom:roles
+          upstream_headers_names:
+            - X-User-Sub
+            - X-User-Email
+            - X-User-Roles
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          max_age: 3600
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Kong-Proxy: true"
+              - "X-Request-Source: cloud-gateway"
+
+  # --------------------------------------------------------------------------
+  # Restaurant Service — Cognito OIDC with anonymous fallback (guest browsing)
+  # --------------------------------------------------------------------------
+  # Anonymous consumer allows unauthenticated GET requests (menu browsing).
+  # Authenticated requests still get user claims forwarded as headers.
+  - name: munchgo-restaurants
+    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    protocol: http
+    port: 80
+    routes:
+      - name: restaurants-route
+        paths:
+          - /api/v1/restaurants
+        strip_path: false
+        protocols:
+          - https
+          - http
+    plugins:
+      - name: openid-connect
+        config:
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          auth_methods:
+            - bearer
+          bearer_token_param_type:
+            - header
+          cache_ttl: 300
+          anonymous: anonymous
+          upstream_headers_claims:
+            - sub
+            - email
+            - custom:roles
+          upstream_headers_names:
+            - X-User-Sub
+            - X-User-Email
+            - X-User-Roles
+      - name: rate-limiting
+        config:
+          minute: 200
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          max_age: 3600
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Kong-Proxy: true"
+              - "X-Request-Source: cloud-gateway"
+
+  # --------------------------------------------------------------------------
+  # Order Service — Cognito OIDC Protected (CQRS)
+  # --------------------------------------------------------------------------
+  - name: munchgo-orders
+    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    protocol: http
+    port: 80
+    routes:
+      - name: orders-route
+        paths:
+          - /api/v1/orders
+        strip_path: false
+        protocols:
+          - https
+          - http
+    plugins:
+      - name: openid-connect
+        config:
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          auth_methods:
+            - bearer
+          bearer_token_param_type:
+            - header
+          cache_ttl: 300
+          upstream_headers_claims:
+            - sub
+            - email
+            - custom:roles
+          upstream_headers_names:
+            - X-User-Sub
+            - X-User-Email
+            - X-User-Roles
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          max_age: 3600
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Kong-Proxy: true"
+              - "X-Request-Source: cloud-gateway"
+
+  # --------------------------------------------------------------------------
+  # Courier Service — Cognito OIDC Protected
+  # --------------------------------------------------------------------------
+  - name: munchgo-couriers
+    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    protocol: http
+    port: 80
+    routes:
+      - name: couriers-route
+        paths:
+          - /api/v1/couriers
+        strip_path: false
+        protocols:
+          - https
+          - http
+    plugins:
+      - name: openid-connect
+        config:
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          auth_methods:
+            - bearer
+          bearer_token_param_type:
+            - header
+          cache_ttl: 300
+          upstream_headers_claims:
+            - sub
+            - email
+            - custom:roles
+          upstream_headers_names:
+            - X-User-Sub
+            - X-User-Email
+            - X-User-Roles
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          max_age: 3600
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Kong-Proxy: true"
+              - "X-Request-Source: cloud-gateway"
+
+  # --------------------------------------------------------------------------
+  # Health Check — Platform health endpoint
+  # --------------------------------------------------------------------------
+  - name: gateway-health
+    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    protocol: http
+    port: 80
+    routes:
+      - name: health-route
+        paths:
+          - /healthz
+        strip_path: false
+        protocols:
+          - https
+          - http
+
+# ==============================================================================
+# CONSUMERS — Anonymous consumer for guest browsing
+# ==============================================================================
+# The anonymous consumer allows unauthenticated users to browse restaurants
+# and menus without logging in, matching the monolith behaviour.
+# The OIDC plugin on the restaurants service falls back to this consumer
+# when no bearer token is provided.
+
+consumers:
+  - username: anonymous
+
+# ==============================================================================
+# NOTE: With the openid-connect plugin, Kong auto-discovers Cognito's JWKS
+# endpoint for token signature verification. No manual RSA public key management.
+# Cognito handles key rotation automatically.
+#
+# After Cognito Terraform apply, update the issuer URLs above:
+#   https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v → https://cognito-idp.<region>.amazonaws.com/<user-pool-id>
+#
+# Get the value from:
+#   terraform output cognito_issuer_url

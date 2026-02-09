@@ -1,0 +1,37 @@
+# ArgoCD App: Istio Gateway (Single Internal NLB Entry Point)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: 5 (after Istio components and namespaces)
+#
+# Creates the Istio Gateway that provisions a single internal NLB.
+# Kong Cloud Gateway reaches all backend services through this single NLB
+# via Transit Gateway, replacing per-service NLBs.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gateway
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shanaka-versent/munchgo-aws-iac.git
+    targetRevision: HEAD
+    path: k8s/istio
+    directory:
+      include: "gateway.yaml"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-ingress
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

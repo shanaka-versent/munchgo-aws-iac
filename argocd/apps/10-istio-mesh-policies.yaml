@@ -1,0 +1,41 @@
+# ArgoCD App: Istio Mesh Policies (Waypoint, AuthZ, PeerAuth, Telemetry)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: 10 (after MunchGo services are deployed)
+#
+# Deploys Istio service mesh policies for east-west traffic:
+#   - Waypoint proxy (L7 capabilities for the munchgo namespace)
+#   - AuthorizationPolicies (access control between services)
+#   - PeerAuthentication (strict mTLS enforcement)
+#   - Telemetry (Prometheus metrics, Jaeger tracing, access logging)
+#
+# These policies require the munchgo namespace and services to exist first.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-mesh-policies
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shanaka-versent/munchgo-aws-iac.git
+    targetRevision: HEAD
+    path: k8s/istio
+    directory:
+      include: "{waypoint.yaml,authorization-policies.yaml,peer-authentication.yaml,telemetry.yaml}"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: munchgo
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

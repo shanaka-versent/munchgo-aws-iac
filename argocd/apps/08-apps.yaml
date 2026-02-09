@@ -1,0 +1,40 @@
+# ArgoCD App: Platform Services (Health Responder)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 4: Application Deployment (ArgoCD)
+# Sync Wave: 7 (after routes)
+#
+# Deploys platform-level services:
+# - health-responder (gateway-health namespace) — Kong health checks
+#
+# MunchGo application services are deployed separately via munchgo-k8s-config
+# GitOps repo (see 09-munchgo-apps.yaml).
+#
+# All services use ClusterIP (no per-service NLBs).
+# Traffic reaches them via Istio Gateway HTTPRoutes.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shanaka-versent/munchgo-aws-iac.git
+    targetRevision: HEAD
+    path: k8s/apps
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

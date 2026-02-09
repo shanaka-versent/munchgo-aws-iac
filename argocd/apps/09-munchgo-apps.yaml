@@ -1,0 +1,53 @@
+# ArgoCD App: MunchGo Microservices — Layer 3→4 Bridge
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# BRIDGE: Layer 3 (this repo) → Layer 4 (munchgo-k8s-config repo)
+# Sync Wave: 8 (after platform apps, Istio mesh, and External Secrets)
+#
+# This is the only connection between the infrastructure repo (Layer 3) and
+# the application GitOps repo (Layer 4). It points to munchgo-k8s-config/argocd/
+# which contains a flat set of ArgoCD Application manifests — one per service.
+# There is no nested root-app; this app directly discovers all service Applications.
+#
+# GitOps CI/CD Flow:
+#   1. Developer pushes to munchgo-microservices/main
+#   2. GitHub Actions builds container → pushes to ECR
+#   3. GitHub Actions updates munchgo-k8s-config/overlays/dev/ (kustomize edit set image)
+#   4. ArgoCD detects change in munchgo-k8s-config → syncs to EKS
+#   5. Rolling deployment of updated service (zero downtime)
+#
+# MunchGo services (each is an individual ArgoCD Application in munchgo-k8s-config):
+#   - munchgo-auth-service (JWT authentication)
+#   - munchgo-consumer-service (customer profiles)
+#   - munchgo-restaurant-service (restaurant & menu management)
+#   - munchgo-courier-service (courier management)
+#   - munchgo-order-service (order lifecycle, CQRS + Event Sourcing)
+#   - munchgo-order-saga-orchestrator (distributed transactions)
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: munchgo-apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shanaka-versent/munchgo-k8s-config.git
+    targetRevision: main
+    path: argocd
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

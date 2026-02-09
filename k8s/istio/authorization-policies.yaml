@@ -1,0 +1,135 @@
+# Istio Ambient Mesh - Authorization Policies for MunchGo East-West Traffic
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+#
+# These policies control east-west (inter-service) traffic within the munchgo namespace.
+# Requires the waypoint proxy to be deployed (L7 policy enforcement).
+#
+# MunchGo Service Communication Matrix:
+# ┌─────────────────────┬──────────────────────────────────────────────────────┐
+# │ Source               │ Allowed Destinations                                │
+# ├─────────────────────┼──────────────────────────────────────────────────────┤
+# │ Istio Gateway        │ All services (north-south ingress via HTTPRoutes)  │
+# │ Saga Orchestrator    │ All services (saga commands via REST + Kafka)      │
+# │ Consumer Service     │ (Kafka only - no direct HTTP to other services)    │
+# │ Restaurant Service   │ (Kafka only - no direct HTTP to other services)    │
+# │ Courier Service      │ (Kafka only - no direct HTTP to other services)    │
+# │ Order Service        │ (Kafka only - no direct HTTP to other services)    │
+# │ Auth Service         │ (Kafka only - publishes user-events)              │
+# └─────────────────────┴──────────────────────────────────────────────────────┘
+#
+# Note: Kafka communication goes through MSK (external to the mesh),
+# so it's not controlled by these policies. These policies control
+# HTTP/gRPC east-west traffic only.
+
+---
+# Allow Istio Gateway to reach all MunchGo services (north-south ingress)
+# L7 policy (enforced by waypoint proxy) — controls per-service access
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-gateway-ingress
+  namespace: munchgo
+spec:
+  targetRefs:
+    - kind: Service
+      group: ""
+      name: munchgo-auth-service
+    - kind: Service
+      group: ""
+      name: munchgo-consumer-service
+    - kind: Service
+      group: ""
+      name: munchgo-restaurant-service
+    - kind: Service
+      group: ""
+      name: munchgo-order-service
+    - kind: Service
+      group: ""
+      name: munchgo-courier-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["istio-ingress"]
+
+---
+# L4 policy (enforced by ztunnel) — allows gateway traffic through the HBONE tunnel
+# In ambient mode, ztunnel enforces L4 policies (no targetRefs).
+# Without this, the ztunnel rejects gateway connections before they reach the waypoint.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-gateway-ingress-l4
+  namespace: munchgo
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["istio-ingress"]
+
+---
+# Allow Saga Orchestrator to call all services (saga coordination via REST)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-saga-orchestrator
+  namespace: munchgo
+spec:
+  targetRefs:
+    - kind: Service
+      group: ""
+      name: munchgo-consumer-service
+    - kind: Service
+      group: ""
+      name: munchgo-restaurant-service
+    - kind: Service
+      group: ""
+      name: munchgo-order-service
+    - kind: Service
+      group: ""
+      name: munchgo-courier-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/munchgo/sa/munchgo-order-saga-orchestrator"]
+
+---
+# Restrict Saga Orchestrator — only reachable from within munchgo namespace
+# and from Istio Gateway (for status/monitoring endpoints)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: restrict-saga-orchestrator
+  namespace: munchgo
+spec:
+  targetRefs:
+    - kind: Service
+      group: ""
+      name: munchgo-order-saga-orchestrator
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["munchgo"]
+    - from:
+        - source:
+            namespaces: ["istio-ingress"]
+
+---
+# Allow health checks from any source (actuator endpoints)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-health-checks
+  namespace: munchgo
+spec:
+  action: ALLOW
+  rules:
+    - to:
+        - operation:
+            paths: ["/actuator/health/*", "/actuator/health"]
+            methods: ["GET"]

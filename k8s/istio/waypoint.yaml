@@ -1,0 +1,31 @@
+# Istio Ambient Mesh - Waypoint Proxy for MunchGo Namespace
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+#
+# A waypoint proxy enables L7 capabilities on top of Istio Ambient's L4 mTLS:
+# - L7 AuthorizationPolicies (HTTP method/path-based access control)
+# - L7 telemetry (request-level metrics, headers, status codes)
+# - Traffic management (retries, timeouts, fault injection)
+# - Distributed tracing (automatic span generation)
+#
+# Without a waypoint, Ambient mesh only provides L4 mTLS (via ztunnel).
+# With a waypoint, east-west traffic gets full L7 observability and policy.
+#
+# This waypoint covers ALL services in the munchgo namespace.
+# Traffic flow: Pod → ztunnel → Waypoint (L7) → ztunnel → Pod
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: munchgo-waypoint
+  namespace: munchgo
+  labels:
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE

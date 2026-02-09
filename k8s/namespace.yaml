@@ -1,0 +1,52 @@
+# Kong Cloud Gateway on EKS - Namespaces with Istio Ambient Mesh
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# IMPORTANT: Label istio.io/dataplane-mode: ambient enables Ambient mesh (NO sidecars)
+# All namespaces enrolled in Ambient mesh get automatic L4 mTLS via ztunnel.
+# The munchgo namespace uses a waypoint proxy for L7 observability and policy enforcement.
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-ingress
+  labels:
+    istio.io/dataplane-mode: ambient
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway-health
+  labels:
+    istio.io/dataplane-mode: ambient
+
+---
+# MunchGo microservices namespace
+# All 6 MunchGo services run here with Istio Ambient L4 mTLS + L7 waypoint proxy
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: munchgo
+  labels:
+    istio.io/dataplane-mode: ambient
+    app.kubernetes.io/part-of: munchgo
+    app.kubernetes.io/managed-by: argocd
+
+---
+# External Secrets Operator namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    istio.io/dataplane-mode: ambient
+
+---
+# Observability namespace (Prometheus, Grafana, Kiali, Jaeger)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    istio.io/dataplane-mode: ambient
