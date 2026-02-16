@@ -9,7 +9,8 @@
 #   1. Reads Terraform outputs (VPC, TGW, Cognito, RDS secrets)
 #   2. Waits for the Istio Gateway NLB to be provisioned
 #   3. Auto-populates ALL placeholders in kong.yaml, ExternalSecrets, and K8s overlays
-#   4. Shows the deck gateway sync command and access URL
+#   4. Creates service databases, Kafka secret, and seeds admin user
+#   5. Syncs Kong routes to Konnect via decK (requires KONNECT_TOKEN in .env)
 #
 # Usage:
 #   ./scripts/03-post-terraform-setup.sh
@@ -329,6 +330,39 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Sync Kong decK configuration to Konnect
+# ---------------------------------------------------------------------------
+sync_kong_config() {
+    local KONG_FILE="${REPO_DIR}/deck/kong.yaml"
+
+    if [[ ! -f "$KONG_FILE" ]]; then
+        warn "deck/kong.yaml not found — skipping Kong sync"
+        return
+    fi
+
+    if [[ -z "${KONNECT_TOKEN:-}" ]]; then
+        warn "KONNECT_TOKEN not set — skipping Kong sync"
+        warn "Set KONNECT_TOKEN in .env and re-run, or sync manually:"
+        warn "  deck gateway sync deck/kong.yaml --konnect-addr https://\${KONNECT_REGION}.api.konghq.com --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name \$KONNECT_CONTROL_PLANE_NAME"
+        return
+    fi
+
+    local REGION="${KONNECT_REGION:-au}"
+    local CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-kong-cloud-gateway-eks}"
+
+    log "Syncing Kong configuration to Konnect (${CP_NAME})..."
+    if deck gateway sync "$KONG_FILE" \
+        --konnect-addr "https://${REGION}.api.konghq.com" \
+        --konnect-token "$KONNECT_TOKEN" \
+        --konnect-control-plane-name "$CP_NAME"; then
+        info "  Kong routes synced successfully"
+    else
+        error "  Kong sync failed — check deck output above"
+        warn "  Retry manually: deck gateway sync deck/kong.yaml --konnect-addr https://${REGION}.api.konghq.com --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name ${CP_NAME}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Seed default admin user
 # ---------------------------------------------------------------------------
 seed_admin_user() {
@@ -350,24 +384,18 @@ show_next_steps() {
     echo "  Next Steps"
     echo "=========================================="
     echo ""
-    echo "  1. Sync Kong configuration:"
-    echo "     deck gateway sync deck/kong.yaml \\"
-    echo "       --konnect-addr https://\${KONNECT_REGION}.api.konghq.com \\"
-    echo "       --konnect-token \$KONNECT_TOKEN \\"
-    echo "       --konnect-control-plane-name \$KONNECT_CONTROL_PLANE_NAME"
-    echo ""
-    echo "  2. Commit the populated config files:"
+    echo "  1. Commit the populated config files:"
     echo "     git add deck/kong.yaml k8s/external-secrets/"
     echo "     git commit -m 'Populate deployment placeholders from terraform outputs'"
     echo ""
-    echo "  3. Generate a test token:"
+    echo "  2. Generate a test token:"
     echo "     ./scripts/02-generate-jwt.sh"
     echo ""
-    echo "  4. Test the API:"
+    echo "  3. Test the API:"
     if [[ -n "$APP_URL" ]]; then
         echo "     curl ${APP_URL}/healthz"
-        echo "     curl ${APP_URL}/api/auth/health"
-        echo "     curl -H 'Authorization: Bearer \$ACCESS_TOKEN' ${APP_URL}/api/orders"
+        echo "     curl ${APP_URL}/api/v1/auth/health"
+        echo "     curl -H 'Authorization: Bearer \$ACCESS_TOKEN' ${APP_URL}/api/v1/orders"
     else
         echo "     curl \$APP_URL/healthz"
         echo "     (Deploy CloudFront in Step 7 to get the application URL)"
@@ -394,6 +422,7 @@ main() {
     populate_k8s_overlay
     create_service_databases
     create_kafka_secret
+    sync_kong_config
     seed_admin_user
     show_next_steps
 }
