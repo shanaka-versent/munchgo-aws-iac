@@ -5,17 +5,19 @@
   "__export_source": "insomnia.desktop.app:v2024.7.0",
   "resources": [
     {
-      "_id": "wrk_munchgo",
+      "_id": "wrk_munchgo_001",
       "_type": "workspace",
       "parentId": null,
       "name": "MunchGo API Collection",
-      "description": "MunchGo Microservices — Kong Cloud Gateway + CloudFront + Istio Ambient Mesh\n\nSetup:\n1. Set base_url in Manage Environments (Ctrl+E / Cmd+E)\n2. Use the 'Run: Full Order Lifecycle' folder for one-click testing\n   → Right-click the folder → Run Tests (or use the Runner tab)\n3. The runner executes all 13 requests in order: register → login → create data → place order → deliver",
-      "scope": "collection"
+      "description": "MunchGo Microservices — Kong Cloud Gateway + CloudFront + Istio Ambient Mesh\n\nSetup:\n1. Set base_url in Manage Environments (Ctrl+E / Cmd+E)\n2. Use the 'Run: Full Order Lifecycle' folder for one-click testing\n   → Runner tab → select folder → Run\n3. The runner executes all 13 requests in order: register → login → create data → place order → deliver",
+      "scope": "collection",
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "env_base",
+      "_id": "env_base_001",
       "_type": "environment",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Base Environment",
       "data": {
         "base_url": "https://dxxxxxxxxx.cloudfront.net",
@@ -31,20 +33,26 @@
       },
       "dataPropertyOrder": {
         "&": ["base_url", "access_token", "refresh_token", "user_id", "consumer_id", "restaurant_id", "order_id", "courier_id", "saga_id", "menu_item_id"]
-      }
+      },
+      "metaSortKey": 1,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
 
     {
-      "_id": "fld_runner",
+      "_id": "fld_runner_001",
       "_type": "request_group",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Run: Full Order Lifecycle",
-      "description": "ONE-CLICK TEST FLOW — Run all 13 requests sequentially.\n\nHow to run:\n1. Right-click this folder → 'Run Tests'\n   OR click the Runner tab at the top → select this folder → Run\n2. All requests execute in order, each passing IDs to the next via environment variables.\n\nFlow: Health → Register → Login → Create Consumer → Create Restaurant → Add Menu → Create Courier → Set Available → Create Order (Saga) → Check Saga → Verify Order → Accept → Deliver"
+      "description": "ONE-CLICK TEST FLOW — Run all 13 requests sequentially.\n\nHow to run:\n1. Click the Runner tab at the top → select this folder → Run\n2. All requests execute in order, each passing IDs to the next via environment variables.\n\nFlow: Health → Register → Login → Create Consumer → Create Restaurant → Add Menu → Create Courier → Set Available → Create Order (Saga) → Check Saga → Verify Order → Accept → Deliver",
+      "metaSortKey": -100,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_01_health",
+      "_id": "req_run01_health",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "01. Health Check",
       "method": "GET",
       "url": "{{ _.base_url }}/healthz",
@@ -52,12 +60,21 @@
       "headers": [],
       "authentication": {},
       "parameters": [],
-      "description": "Verify platform connectivity. Expected: \"healthy\""
+      "description": "Verify platform connectivity. Expected: \"healthy\"",
+      "metaSortKey": -1300,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_02_register",
+      "_id": "req_run02_register",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "02. Register User",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/auth/register",
@@ -66,16 +83,25 @@
         "text": "{\n  \"username\": \"testrunner\",\n  \"email\": \"testrunner@example.com\",\n  \"password\": \"Test@1234\",\n  \"role\": \"CONSUMER\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"Runner\"\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h1", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {},
       "parameters": [],
-      "description": "Register a test user in Cognito."
+      "description": "Register a test user in Cognito.",
+      "metaSortKey": -1200,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_03_login",
+      "_id": "req_run03_login",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "03. Login",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/auth/login",
@@ -84,17 +110,26 @@
         "text": "{\n  \"email\": \"testrunner@example.com\",\n  \"password\": \"Test@1234\"\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h2", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {},
       "parameters": [],
       "description": "Login and capture tokens. After-response script sets access_token, refresh_token, user_id.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}\nif (body.refreshToken) {\n  insomnia.environment.set('refresh_token', body.refreshToken);\n}\nif (body.userId) {\n  insomnia.environment.set('user_id', body.userId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}\nif (body.refreshToken) {\n  insomnia.environment.set('refresh_token', body.refreshToken);\n}\nif (body.userId) {\n  insomnia.environment.set('user_id', body.userId);\n}",
+      "metaSortKey": -1100,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_04_create_consumer",
+      "_id": "req_run04_consumer",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "04. Create Consumer",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/consumers",
@@ -103,7 +138,7 @@
         "text": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phoneNumber\": \"+61412345678\",\n  \"address\": {\n    \"street1\": \"123 Collins Street\",\n    \"street2\": \"Level 5\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h3", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {
         "type": "bearer",
@@ -111,12 +146,21 @@
       },
       "parameters": [],
       "description": "Create consumer profile. Captures consumer_id.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.consumerId) {\n  insomnia.environment.set('consumer_id', body.consumerId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.consumerId) {\n  insomnia.environment.set('consumer_id', body.consumerId);\n}",
+      "metaSortKey": -1000,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_05_create_restaurant",
+      "_id": "req_run05_restaurant",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "05. Create Restaurant",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/restaurants",
@@ -125,7 +169,7 @@
         "text": "{\n  \"name\": \"Melbourne Burger House\",\n  \"address\": {\n    \"street1\": \"100 Lygon Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3053\",\n    \"country\": \"AU\"\n  },\n  \"orderMinimum\": 15.00\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h4", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {
         "type": "bearer",
@@ -133,12 +177,21 @@
       },
       "parameters": [],
       "description": "Create restaurant. Captures restaurant_id.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.restaurantId) {\n  insomnia.environment.set('restaurant_id', body.restaurantId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.restaurantId) {\n  insomnia.environment.set('restaurant_id', body.restaurantId);\n}",
+      "metaSortKey": -900,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_06_add_menu",
+      "_id": "req_run06_menu",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "06. Add Menu Item",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/menu-items",
@@ -147,19 +200,28 @@
         "text": "{\n  \"menuItemId\": \"burger-01\",\n  \"name\": \"Classic Cheeseburger\",\n  \"price\": 18.50,\n  \"description\": \"Angus beef patty with cheddar, lettuce, tomato, and house sauce\"\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h5", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {
         "type": "bearer",
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Add a menu item to the restaurant."
+      "description": "Add a menu item to the restaurant.",
+      "metaSortKey": -800,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_07_create_courier",
+      "_id": "req_run07_courier",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "07. Create Courier",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/couriers",
@@ -168,7 +230,7 @@
         "text": "{\n  \"firstName\": \"Mike\",\n  \"lastName\": \"Rider\",\n  \"address\": {\n    \"street1\": \"50 Spencer Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h6", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {
         "type": "bearer",
@@ -176,12 +238,21 @@
       },
       "parameters": [],
       "description": "Create courier profile. Captures courier_id.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.courierId) {\n  insomnia.environment.set('courier_id', body.courierId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.courierId) {\n  insomnia.environment.set('courier_id', body.courierId);\n}",
+      "metaSortKey": -700,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_08_courier_available",
+      "_id": "req_run08_available",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "08. Set Courier Available",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}/availability",
@@ -190,19 +261,28 @@
         "text": "{\n  \"available\": true\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h7", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {
         "type": "bearer",
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Mark courier as available for deliveries."
+      "description": "Mark courier as available for deliveries.",
+      "metaSortKey": -600,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_09_create_order_saga",
+      "_id": "req_run09_saga",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "09. Create Order (Saga)",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/sagas/create-order",
@@ -211,7 +291,7 @@
         "text": "{\n  \"consumerId\": \"{{ _.consumer_id }}\",\n  \"restaurantId\": \"{{ _.restaurant_id }}\",\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ],\n  \"deliveryAddress\": {\n    \"street1\": \"789 Flinders Lane\",\n    \"street2\": \"Suite 2\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h8", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {
         "type": "bearer",
@@ -219,12 +299,21 @@
       },
       "parameters": [],
       "description": "Start Create Order Saga. Captures saga_id and order_id.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.sagaId) {\n  insomnia.environment.set('saga_id', body.sagaId);\n}\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.sagaId) {\n  insomnia.environment.set('saga_id', body.sagaId);\n}\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}",
+      "metaSortKey": -500,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_10_saga_status",
+      "_id": "req_run10_sagastatus",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "10. Check Saga Status",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/sagas/{{ _.saga_id }}",
@@ -235,12 +324,21 @@
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Verify saga completed successfully. Expected state: COMPLETED"
+      "description": "Verify saga completed successfully. Expected state: COMPLETED",
+      "metaSortKey": -400,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_11_verify_order",
+      "_id": "req_run11_verify",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "11. Verify Order Created",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}",
@@ -251,12 +349,21 @@
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Verify the order was created by the saga."
+      "description": "Verify the order was created by the saga.",
+      "metaSortKey": -300,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_12_accept_order",
+      "_id": "req_run12_accept",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "12. Accept Order",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/accept",
@@ -265,19 +372,28 @@
         "text": "{\n  \"readyBy\": \"2026-02-16T19:30:00Z\"\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h9", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {
         "type": "bearer",
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Restaurant accepts the order ticket."
+      "description": "Restaurant accepts the order ticket.",
+      "metaSortKey": -200,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "run_13_delivered",
+      "_id": "req_run13_delivered",
       "_type": "request",
-      "parentId": "fld_runner",
+      "parentId": "fld_runner_001",
       "name": "13. Mark Delivered",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/delivered",
@@ -288,20 +404,32 @@
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Order delivered — full lifecycle complete."
+      "description": "Order delivered — full lifecycle complete.",
+      "metaSortKey": -100,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
 
     {
-      "_id": "fld_health",
+      "_id": "fld_health_001",
       "_type": "request_group",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Health",
-      "description": "Platform health check — public, no auth required"
+      "description": "Platform health check — public, no auth required",
+      "metaSortKey": -90,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_healthz",
+      "_id": "req_healthz_001",
       "_type": "request",
-      "parentId": "fld_health",
+      "parentId": "fld_health_001",
       "name": "Health Check",
       "method": "GET",
       "url": "{{ _.base_url }}/healthz",
@@ -309,20 +437,32 @@
       "headers": [],
       "authentication": {},
       "parameters": [],
-      "description": "Platform health endpoint routed through CloudFront → Kong → Istio → health-responder pod.\nExpected response: \"healthy\""
+      "description": "Platform health endpoint routed through CloudFront → Kong → Istio → health-responder pod.\nExpected response: \"healthy\"",
+      "metaSortKey": -100,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
 
     {
-      "_id": "fld_auth",
+      "_id": "fld_auth_001",
       "_type": "request_group",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Auth Service (Public)",
-      "description": "Public authentication endpoints — no OIDC token required.\nAuth service proxies to Amazon Cognito for user management.\nRate limit: 60 req/min"
+      "description": "Public authentication endpoints — no OIDC token required.\nAuth service proxies to Amazon Cognito for user management.\nRate limit: 60 req/min",
+      "metaSortKey": -80,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_register",
+      "_id": "req_register_001",
       "_type": "request",
-      "parentId": "fld_auth",
+      "parentId": "fld_auth_001",
       "name": "Register User",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/auth/register",
@@ -331,16 +471,25 @@
         "text": "{\n  \"username\": \"testuser\",\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test@1234\",\n  \"role\": \"CONSUMER\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\"\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h10", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {},
       "parameters": [],
-      "description": "Register a new user in Amazon Cognito.\nRoles: CONSUMER, RESTAURANT_OWNER, COURIER, ADMIN\nPre Token Lambda adds custom:roles claim to the JWT."
+      "description": "Register a new user in Amazon Cognito.\nRoles: CONSUMER, RESTAURANT_OWNER, COURIER, ADMIN\nPre Token Lambda adds custom:roles claim to the JWT.",
+      "metaSortKey": -500,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_login",
+      "_id": "req_login_001",
       "_type": "request",
-      "parentId": "fld_auth",
+      "parentId": "fld_auth_001",
       "name": "Login",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/auth/login",
@@ -349,17 +498,26 @@
         "text": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test@1234\"\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h11", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {},
       "parameters": [],
       "description": "Authenticate user via Cognito ADMIN_USER_PASSWORD_AUTH flow.\nReturns: accessToken, idToken, refreshToken, userId\n\nAfter-response script auto-populates:\n- access_token\n- refresh_token\n- user_id",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}\nif (body.refreshToken) {\n  insomnia.environment.set('refresh_token', body.refreshToken);\n}\nif (body.userId) {\n  insomnia.environment.set('user_id', body.userId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}\nif (body.refreshToken) {\n  insomnia.environment.set('refresh_token', body.refreshToken);\n}\nif (body.userId) {\n  insomnia.environment.set('user_id', body.userId);\n}",
+      "metaSortKey": -400,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_refresh",
+      "_id": "req_refresh_001",
       "_type": "request",
-      "parentId": "fld_auth",
+      "parentId": "fld_auth_001",
       "name": "Refresh Token",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/auth/refresh",
@@ -368,17 +526,26 @@
         "text": "{\n  \"refreshToken\": \"{{ _.refresh_token }}\"\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h12", "name": "Content-Type", "value": "application/json" }
       ],
       "authentication": {},
       "parameters": [],
       "description": "Refresh Cognito tokens using the refresh token.\nReturns new accessToken and idToken (refresh token stays the same).",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}",
+      "metaSortKey": -300,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_logout",
+      "_id": "req_logout_001",
       "_type": "request",
-      "parentId": "fld_auth",
+      "parentId": "fld_auth_001",
       "name": "Logout",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/auth/logout/{{ _.user_id }}",
@@ -386,12 +553,21 @@
       "headers": [],
       "authentication": {},
       "parameters": [],
-      "description": "Revoke all Cognito tokens for the user (AdminUserGlobalSignOut).\nAll existing access/refresh tokens become invalid."
+      "description": "Revoke all Cognito tokens for the user (AdminUserGlobalSignOut).\nAll existing access/refresh tokens become invalid.",
+      "metaSortKey": -200,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_profile",
+      "_id": "req_profile_001",
       "_type": "request",
-      "parentId": "fld_auth",
+      "parentId": "fld_auth_001",
       "name": "Get Profile",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/auth/profile/{{ _.user_id }}",
@@ -399,20 +575,32 @@
       "headers": [],
       "authentication": {},
       "parameters": [],
-      "description": "Get user profile from Cognito (AdminGetUser).\nReturns: username, email, role, firstName, lastName, status."
+      "description": "Get user profile from Cognito (AdminGetUser).\nReturns: username, email, role, firstName, lastName, status.",
+      "metaSortKey": -100,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
 
     {
-      "_id": "fld_consumers",
+      "_id": "fld_consumers_001",
       "_type": "request_group",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Consumer Service (OIDC)",
-      "description": "Consumer management endpoints — Cognito OIDC protected.\nKong validates JWT and forwards X-User-Sub, X-User-Email, X-User-Roles headers.\nRate limit: 100 req/min"
+      "description": "Consumer management endpoints — Cognito OIDC protected.\nKong validates JWT and forwards X-User-Sub, X-User-Email, X-User-Roles headers.\nRate limit: 100 req/min",
+      "metaSortKey": -70,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_create_consumer",
+      "_id": "req_create_consumer_001",
       "_type": "request",
-      "parentId": "fld_consumers",
+      "parentId": "fld_consumers_001",
       "name": "Create Consumer",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/consumers",
@@ -421,52 +609,70 @@
         "text": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phoneNumber\": \"+61412345678\",\n  \"address\": {\n    \"street1\": \"123 Collins Street\",\n    \"street2\": \"Level 5\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h13", "name": "Content-Type", "value": "application/json" }
       ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
       "description": "Create a new consumer profile.\nAfter-response script auto-populates consumer_id.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.consumerId) {\n  insomnia.environment.set('consumer_id', body.consumerId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.consumerId) {\n  insomnia.environment.set('consumer_id', body.consumerId);\n}",
+      "metaSortKey": -800,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_list_consumers",
+      "_id": "req_list_consumers_001",
       "_type": "request",
-      "parentId": "fld_consumers",
+      "parentId": "fld_consumers_001",
       "name": "List Consumers",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/consumers",
       "body": {},
       "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "List all consumers."
+      "description": "List all consumers.",
+      "metaSortKey": -700,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_get_consumer",
+      "_id": "req_get_consumer_001",
       "_type": "request",
-      "parentId": "fld_consumers",
+      "parentId": "fld_consumers_001",
       "name": "Get Consumer by ID",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}",
       "body": {},
       "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Get a specific consumer by ID."
+      "description": "Get a specific consumer by ID.",
+      "metaSortKey": -600,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_update_consumer",
+      "_id": "req_update_consumer_001",
       "_type": "request",
-      "parentId": "fld_consumers",
+      "parentId": "fld_consumers_001",
       "name": "Update Consumer",
       "method": "PUT",
       "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}",
@@ -475,19 +681,25 @@
         "text": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"phoneNumber\": \"+61498765432\",\n  \"address\": {\n    \"street1\": \"456 Bourke Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h14", "name": "Content-Type", "value": "application/json" }
       ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Update consumer profile details."
+      "description": "Update consumer profile details.",
+      "metaSortKey": -500,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_update_consumer_address",
+      "_id": "req_update_addr_001",
       "_type": "request",
-      "parentId": "fld_consumers",
+      "parentId": "fld_consumers_001",
       "name": "Update Consumer Address",
       "method": "PUT",
       "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}/address",
@@ -496,75 +708,102 @@
         "text": "{\n  \"street1\": \"789 Flinders Lane\",\n  \"street2\": \"Suite 2\",\n  \"city\": \"Melbourne\",\n  \"state\": \"VIC\",\n  \"zip\": \"3000\",\n  \"country\": \"AU\"\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h15", "name": "Content-Type", "value": "application/json" }
       ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Update only the consumer's delivery address."
+      "description": "Update only the consumer's delivery address.",
+      "metaSortKey": -400,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_validate_consumer",
+      "_id": "req_validate_consumer_001",
       "_type": "request",
-      "parentId": "fld_consumers",
+      "parentId": "fld_consumers_001",
       "name": "Validate Consumer",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}/validate",
       "body": {},
       "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Validate that a consumer is eligible to place orders.\nUsed internally by the saga orchestrator during order creation."
+      "description": "Validate that a consumer is eligible to place orders.",
+      "metaSortKey": -300,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_deactivate_consumer",
+      "_id": "req_deact_consumer_001",
       "_type": "request",
-      "parentId": "fld_consumers",
+      "parentId": "fld_consumers_001",
       "name": "Deactivate Consumer",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}/deactivate",
       "body": {},
       "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Deactivate a consumer account (soft delete)."
+      "description": "Deactivate a consumer account (soft delete).",
+      "metaSortKey": -200,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_activate_consumer",
+      "_id": "req_act_consumer_001",
       "_type": "request",
-      "parentId": "fld_consumers",
+      "parentId": "fld_consumers_001",
       "name": "Activate Consumer",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}/activate",
       "body": {},
       "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Reactivate a previously deactivated consumer."
+      "description": "Reactivate a previously deactivated consumer.",
+      "metaSortKey": -100,
+      "isPrivate": false,
+      "settingEncodeUrl": true,
+      "settingFollowRedirects": "global",
+      "settingSendCookies": true,
+      "settingStoreCookies": true,
+      "settingRebuildPath": true,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
 
     {
-      "_id": "fld_restaurants",
+      "_id": "fld_restaurants_001",
       "_type": "request_group",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Restaurant Service (OIDC + Anonymous)",
-      "description": "Restaurant and menu management — OIDC protected with anonymous fallback.\nGET requests work without auth (guest menu browsing).\nPOST/PUT/DELETE require valid Cognito JWT.\nRate limit: 200 req/min"
+      "description": "Restaurant and menu management — OIDC protected with anonymous fallback.\nGET requests work without auth (guest menu browsing).\nPOST/PUT/DELETE require valid Cognito JWT.\nRate limit: 200 req/min",
+      "metaSortKey": -60,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_create_restaurant",
+      "_id": "req_create_rest_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Create Restaurant",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/restaurants",
@@ -573,20 +812,19 @@
         "text": "{\n  \"name\": \"Melbourne Burger House\",\n  \"address\": {\n    \"street1\": \"100 Lygon Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3053\",\n    \"country\": \"AU\"\n  },\n  \"orderMinimum\": 15.00\n}"
       },
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        { "id": "h16", "name": "Content-Type", "value": "application/json" }
       ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Create a new restaurant. Requires RESTAURANT_OWNER role.\nAfter-response script auto-populates restaurant_id.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.restaurantId) {\n  insomnia.environment.set('restaurant_id', body.restaurantId);\n}"
+      "description": "Create a new restaurant. Requires RESTAURANT_OWNER role.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.restaurantId) {\n  insomnia.environment.set('restaurant_id', body.restaurantId);\n}",
+      "metaSortKey": -1000,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_list_restaurants",
+      "_id": "req_list_rest_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "List Restaurants (Public)",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/restaurants",
@@ -594,14 +832,16 @@
       "headers": [],
       "authentication": {},
       "parameters": [
-        { "name": "city", "value": "Melbourne", "disabled": true }
+        { "id": "p1", "name": "city", "value": "Melbourne", "disabled": true }
       ],
-      "description": "List all restaurants. No auth required (anonymous guest browsing).\nOptional query param: city"
+      "description": "List all restaurants. No auth required (anonymous guest browsing).",
+      "metaSortKey": -900,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_get_restaurant",
+      "_id": "req_get_rest_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Get Restaurant with Menu (Public)",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}",
@@ -609,644 +849,475 @@
       "headers": [],
       "authentication": {},
       "parameters": [],
-      "description": "Get restaurant details including full menu. No auth required."
+      "description": "Get restaurant details including full menu. No auth required.",
+      "metaSortKey": -800,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_update_restaurant",
+      "_id": "req_update_rest_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Update Restaurant",
       "method": "PUT",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"name\": \"Melbourne Burger House (Updated)\",\n  \"address\": {\n    \"street1\": \"100 Lygon Street\",\n    \"street2\": \"Ground Floor\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3053\",\n    \"country\": \"AU\"\n  },\n  \"orderMinimum\": 20.00\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": { "mimeType": "application/json", "text": "{\n  \"name\": \"Melbourne Burger House (Updated)\",\n  \"address\": {\n    \"street1\": \"100 Lygon Street\",\n    \"street2\": \"Ground Floor\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3053\",\n    \"country\": \"AU\"\n  },\n  \"orderMinimum\": 20.00\n}" },
+      "headers": [ { "id": "h17", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Update restaurant details. Requires OIDC auth."
+      "description": "Update restaurant details. Requires OIDC auth.",
+      "metaSortKey": -700,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_add_menu_item",
+      "_id": "req_add_menu_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Add Menu Item",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/menu-items",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"menuItemId\": \"burger-01\",\n  \"name\": \"Classic Cheeseburger\",\n  \"price\": 18.50,\n  \"description\": \"Angus beef patty with cheddar, lettuce, tomato, and house sauce\"\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": { "mimeType": "application/json", "text": "{\n  \"menuItemId\": \"burger-01\",\n  \"name\": \"Classic Cheeseburger\",\n  \"price\": 18.50,\n  \"description\": \"Angus beef patty with cheddar, lettuce, tomato, and house sauce\"\n}" },
+      "headers": [ { "id": "h18", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Add a menu item to a restaurant."
+      "description": "Add a menu item to a restaurant.",
+      "metaSortKey": -600,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_update_menu_item",
+      "_id": "req_upd_menu_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Update Menu Item",
       "method": "PUT",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/menu-items/{{ _.menu_item_id }}",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"name\": \"Classic Cheeseburger Deluxe\",\n  \"price\": 22.00,\n  \"description\": \"Double angus beef patty with aged cheddar, caramelised onion, and truffle aioli\"\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": { "mimeType": "application/json", "text": "{\n  \"name\": \"Classic Cheeseburger Deluxe\",\n  \"price\": 22.00,\n  \"description\": \"Double angus beef patty with aged cheddar, caramelised onion, and truffle aioli\"\n}" },
+      "headers": [ { "id": "h19", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Update an existing menu item."
+      "description": "Update an existing menu item.",
+      "metaSortKey": -500,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_delete_menu_item",
+      "_id": "req_del_menu_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Delete Menu Item",
       "method": "DELETE",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/menu-items/{{ _.menu_item_id }}",
       "body": {},
       "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Remove a menu item from a restaurant."
+      "description": "Remove a menu item from a restaurant.",
+      "metaSortKey": -400,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_validate_order",
+      "_id": "req_validate_ord_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Validate Order",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/validate-order",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ]\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": { "mimeType": "application/json", "text": "{\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ]\n}" },
+      "headers": [ { "id": "h20", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Validate that an order's line items are valid against the restaurant's menu.\nUsed internally by the saga orchestrator during order creation."
+      "description": "Validate order line items against the restaurant's menu.",
+      "metaSortKey": -300,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_deactivate_restaurant",
+      "_id": "req_deact_rest_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Deactivate Restaurant",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/deactivate",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Deactivate a restaurant (stops accepting orders)."
+      "description": "Deactivate a restaurant (stops accepting orders).",
+      "metaSortKey": -200,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_activate_restaurant",
+      "_id": "req_act_rest_001",
       "_type": "request",
-      "parentId": "fld_restaurants",
+      "parentId": "fld_restaurants_001",
       "name": "Activate Restaurant",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/activate",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Reactivate a previously deactivated restaurant."
+      "description": "Reactivate a previously deactivated restaurant.",
+      "metaSortKey": -100,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
 
     {
-      "_id": "fld_orders",
+      "_id": "fld_orders_001",
       "_type": "request_group",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Order Service (OIDC) — CQRS",
-      "description": "Order management with CQRS pattern — separate query and command controllers.\nAll endpoints require Cognito OIDC JWT.\nRate limit: 100 req/min\n\nNote: For creating orders via the SPA, use the Saga Orchestrator (POST /api/v1/sagas/create-order)."
+      "description": "Order management with CQRS pattern.\nAll endpoints require Cognito OIDC JWT. Rate limit: 100 req/min",
+      "metaSortKey": -50,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "fld_orders_query",
+      "_id": "fld_orders_q_001",
       "_type": "request_group",
-      "parentId": "fld_orders",
+      "parentId": "fld_orders_001",
       "name": "Queries (Read)",
-      "description": "Order query endpoints — read-only, paginated responses."
+      "description": "Order query endpoints — read-only, paginated responses.",
+      "metaSortKey": -200,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_get_order",
+      "_id": "req_get_order_001",
       "_type": "request",
-      "parentId": "fld_orders_query",
+      "parentId": "fld_orders_q_001",
       "name": "Get Order by ID",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Get a specific order by ID. Returns full order details including state, line items, and delivery info."
+      "description": "Get a specific order by ID.",
+      "metaSortKey": -600,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_orders_by_consumer",
+      "_id": "req_ord_consumer_001",
       "_type": "request",
-      "parentId": "fld_orders_query",
+      "parentId": "fld_orders_q_001",
       "name": "Get Orders by Consumer",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/orders",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [
-        { "name": "consumerId", "value": "{{ _.consumer_id }}" },
-        { "name": "page", "value": "0" },
-        { "name": "size", "value": "20" },
-        { "name": "state", "value": "APPROVED", "disabled": true }
+        { "id": "p2", "name": "consumerId", "value": "{{ _.consumer_id }}" },
+        { "id": "p3", "name": "page", "value": "0" },
+        { "id": "p4", "name": "size", "value": "20" },
+        { "id": "p5", "name": "state", "value": "APPROVED", "disabled": true }
       ],
-      "description": "Get paginated orders for a specific consumer.\nOptional state filter: APPROVAL_PENDING, APPROVED, REJECTED, CANCEL_PENDING, CANCELLED, PREPARING, READY_FOR_PICKUP, PICKED_UP, DELIVERED"
+      "description": "Get paginated orders for a specific consumer.\nOptional state filter: APPROVAL_PENDING, APPROVED, REJECTED, CANCELLED, PREPARING, READY_FOR_PICKUP, PICKED_UP, DELIVERED",
+      "metaSortKey": -500,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_orders_by_restaurant",
+      "_id": "req_ord_rest_001",
       "_type": "request",
-      "parentId": "fld_orders_query",
+      "parentId": "fld_orders_q_001",
       "name": "Get Orders by Restaurant",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/orders",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [
-        { "name": "restaurantId", "value": "{{ _.restaurant_id }}" },
-        { "name": "page", "value": "0" },
-        { "name": "size", "value": "20" }
+        { "id": "p6", "name": "restaurantId", "value": "{{ _.restaurant_id }}" },
+        { "id": "p7", "name": "page", "value": "0" },
+        { "id": "p8", "name": "size", "value": "20" }
       ],
-      "description": "Get paginated orders for a specific restaurant."
+      "description": "Get paginated orders for a specific restaurant.",
+      "metaSortKey": -400,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_orders_by_courier",
+      "_id": "req_ord_courier_001",
       "_type": "request",
-      "parentId": "fld_orders_query",
+      "parentId": "fld_orders_q_001",
       "name": "Get Orders by Courier",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/orders",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [
-        { "name": "courierId", "value": "{{ _.courier_id }}" },
-        { "name": "page", "value": "0" },
-        { "name": "size", "value": "20" }
+        { "id": "p9", "name": "courierId", "value": "{{ _.courier_id }}" },
+        { "id": "p10", "name": "page", "value": "0" },
+        { "id": "p11", "name": "size", "value": "20" }
       ],
-      "description": "Get paginated orders assigned to a specific courier."
+      "description": "Get paginated orders assigned to a specific courier.",
+      "metaSortKey": -300,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_orders_by_state",
+      "_id": "req_ord_state_001",
       "_type": "request",
-      "parentId": "fld_orders_query",
+      "parentId": "fld_orders_q_001",
       "name": "Get Orders by State",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/orders",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [
-        { "name": "state", "value": "APPROVAL_PENDING" },
-        { "name": "page", "value": "0" },
-        { "name": "size", "value": "100" }
+        { "id": "p12", "name": "state", "value": "APPROVAL_PENDING" },
+        { "id": "p13", "name": "page", "value": "0" },
+        { "id": "p14", "name": "size", "value": "100" }
       ],
-      "description": "Get paginated orders by state.\nStates: APPROVAL_PENDING, APPROVED, REJECTED, CANCEL_PENDING, CANCELLED, PREPARING, READY_FOR_PICKUP, PICKED_UP, DELIVERED"
+      "description": "Get paginated orders by state.",
+      "metaSortKey": -200,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_order_history",
+      "_id": "req_ord_history_001",
       "_type": "request",
-      "parentId": "fld_orders_query",
+      "parentId": "fld_orders_q_001",
       "name": "Get Order History",
       "method": "GET",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/history",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Get the full event history for an order (event-sourced audit trail)."
+      "description": "Get the full event history for an order (event-sourced audit trail).",
+      "metaSortKey": -100,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "fld_orders_cmd",
+      "_id": "fld_orders_c_001",
       "_type": "request_group",
-      "parentId": "fld_orders",
+      "parentId": "fld_orders_001",
       "name": "Commands (Write)",
-      "description": "Order command endpoints — state transitions and mutations."
+      "description": "Order command endpoints — state transitions and mutations.",
+      "metaSortKey": -100,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_create_order",
+      "_id": "req_create_ord_001",
       "_type": "request",
-      "parentId": "fld_orders_cmd",
+      "parentId": "fld_orders_c_001",
       "name": "Create Order (Direct)",
       "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"consumerId\": \"{{ _.consumer_id }}\",\n  \"restaurantId\": \"{{ _.restaurant_id }}\",\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ],\n  \"deliveryAddress\": {\n    \"street1\": \"789 Flinders Lane\",\n    \"street2\": \"Suite 2\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  },\n  \"totalAmount\": 37.00\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": { "mimeType": "application/json", "text": "{\n  \"consumerId\": \"{{ _.consumer_id }}\",\n  \"restaurantId\": \"{{ _.restaurant_id }}\",\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ],\n  \"deliveryAddress\": {\n    \"street1\": \"789 Flinders Lane\",\n    \"street2\": \"Suite 2\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  },\n  \"totalAmount\": 37.00\n}" },
+      "headers": [ { "id": "h21", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Create an order directly (bypasses saga orchestration).\nFor production use, prefer POST /api/v1/sagas/create-order which coordinates validation across services.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}"
+      "description": "Create an order directly (bypasses saga). Prefer POST /api/v1/sagas/create-order.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}",
+      "metaSortKey": -900,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_approve_order",
-      "_type": "request",
-      "parentId": "fld_orders_cmd",
-      "name": "Approve Order",
-      "method": "POST",
+      "_id": "req_approve_001", "_type": "request", "parentId": "fld_orders_c_001",
+      "name": "Approve Order", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/approve",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"courierId\": \"{{ _.courier_id }}\"\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Approve an order and assign a courier. Transitions: APPROVAL_PENDING → APPROVED"
+      "body": { "mimeType": "application/json", "text": "{\n  \"courierId\": \"{{ _.courier_id }}\"\n}" },
+      "headers": [ { "id": "h22", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Approve an order and assign a courier. APPROVAL_PENDING → APPROVED",
+      "metaSortKey": -800,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_reject_order",
-      "_type": "request",
-      "parentId": "fld_orders_cmd",
-      "name": "Reject Order",
-      "method": "POST",
+      "_id": "req_reject_001", "_type": "request", "parentId": "fld_orders_c_001",
+      "name": "Reject Order", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/reject",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"reason\": \"Restaurant is closed\"\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Reject an order. Transitions: APPROVAL_PENDING → REJECTED"
+      "body": { "mimeType": "application/json", "text": "{\n  \"reason\": \"Restaurant is closed\"\n}" },
+      "headers": [ { "id": "h23", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Reject an order. APPROVAL_PENDING → REJECTED",
+      "metaSortKey": -700,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_cancel_order",
-      "_type": "request",
-      "parentId": "fld_orders_cmd",
-      "name": "Cancel Order",
-      "method": "POST",
+      "_id": "req_cancel_001", "_type": "request", "parentId": "fld_orders_c_001",
+      "name": "Cancel Order", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/cancel",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"reason\": \"Customer changed their mind\"\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Cancel an order. Transitions: APPROVED → CANCEL_PENDING → CANCELLED"
+      "body": { "mimeType": "application/json", "text": "{\n  \"reason\": \"Customer changed their mind\"\n}" },
+      "headers": [ { "id": "h24", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Cancel an order. APPROVED → CANCEL_PENDING → CANCELLED",
+      "metaSortKey": -600,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_accept_order",
-      "_type": "request",
-      "parentId": "fld_orders_cmd",
-      "name": "Accept Order (Ticket)",
-      "method": "POST",
+      "_id": "req_accept_001", "_type": "request", "parentId": "fld_orders_c_001",
+      "name": "Accept Order (Ticket)", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/accept",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"readyBy\": \"2026-02-16T19:30:00Z\"\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Restaurant accepts the order ticket with an estimated ready time.\nTransitions: APPROVED → ACCEPTED"
+      "body": { "mimeType": "application/json", "text": "{\n  \"readyBy\": \"2026-02-16T19:30:00Z\"\n}" },
+      "headers": [ { "id": "h25", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Restaurant accepts the order ticket. APPROVED → ACCEPTED",
+      "metaSortKey": -500,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_preparing_order",
-      "_type": "request",
-      "parentId": "fld_orders_cmd",
-      "name": "Mark Preparing",
-      "method": "POST",
+      "_id": "req_preparing_001", "_type": "request", "parentId": "fld_orders_c_001",
+      "name": "Mark Preparing", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/preparing",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Restaurant starts preparing the order. Transitions: ACCEPTED → PREPARING"
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Restaurant starts preparing. ACCEPTED → PREPARING",
+      "metaSortKey": -400,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_ready_for_pickup",
-      "_type": "request",
-      "parentId": "fld_orders_cmd",
-      "name": "Mark Ready for Pickup",
-      "method": "POST",
+      "_id": "req_ready_001", "_type": "request", "parentId": "fld_orders_c_001",
+      "name": "Mark Ready for Pickup", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/ready-for-pickup",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Order is ready for courier pickup. Transitions: PREPARING → READY_FOR_PICKUP"
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Order ready for pickup. PREPARING → READY_FOR_PICKUP",
+      "metaSortKey": -300,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_picked_up",
-      "_type": "request",
-      "parentId": "fld_orders_cmd",
-      "name": "Mark Picked Up",
-      "method": "POST",
+      "_id": "req_pickedup_001", "_type": "request", "parentId": "fld_orders_c_001",
+      "name": "Mark Picked Up", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/picked-up",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Courier picks up the order from the restaurant. Transitions: READY_FOR_PICKUP → PICKED_UP"
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Courier picks up the order. READY_FOR_PICKUP → PICKED_UP",
+      "metaSortKey": -200,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_delivered",
-      "_type": "request",
-      "parentId": "fld_orders_cmd",
-      "name": "Mark Delivered",
-      "method": "POST",
+      "_id": "req_delivered_001", "_type": "request", "parentId": "fld_orders_c_001",
+      "name": "Mark Delivered", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/delivered",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Courier delivers the order to the consumer. Transitions: PICKED_UP → DELIVERED (terminal state)"
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Order delivered. PICKED_UP → DELIVERED (terminal state)",
+      "metaSortKey": -100,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
 
     {
-      "_id": "fld_couriers",
+      "_id": "fld_couriers_001",
       "_type": "request_group",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Courier Service (OIDC)",
-      "description": "Courier management endpoints — Cognito OIDC protected.\nRate limit: 100 req/min"
+      "description": "Courier management endpoints — Cognito OIDC protected.\nRate limit: 100 req/min",
+      "metaSortKey": -40,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_create_courier",
-      "_type": "request",
-      "parentId": "fld_couriers",
-      "name": "Create Courier",
-      "method": "POST",
+      "_id": "req_create_cour_001", "_type": "request", "parentId": "fld_couriers_001",
+      "name": "Create Courier", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/couriers",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"firstName\": \"Mike\",\n  \"lastName\": \"Rider\",\n  \"address\": {\n    \"street1\": \"50 Spencer Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Create a new courier profile.\nAfter-response script auto-populates courier_id.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.courierId) {\n  insomnia.environment.set('courier_id', body.courierId);\n}"
+      "body": { "mimeType": "application/json", "text": "{\n  \"firstName\": \"Mike\",\n  \"lastName\": \"Rider\",\n  \"address\": {\n    \"street1\": \"50 Spencer Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}" },
+      "headers": [ { "id": "h26", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Create a new courier profile.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.courierId) {\n  insomnia.environment.set('courier_id', body.courierId);\n}",
+      "metaSortKey": -800,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_list_couriers",
-      "_type": "request",
-      "parentId": "fld_couriers",
-      "name": "List Couriers",
-      "method": "GET",
+      "_id": "req_list_cour_001", "_type": "request", "parentId": "fld_couriers_001",
+      "name": "List Couriers", "method": "GET",
       "url": "{{ _.base_url }}/api/v1/couriers",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "List all couriers."
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "List all couriers.",
+      "metaSortKey": -700,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_get_courier",
-      "_type": "request",
-      "parentId": "fld_couriers",
-      "name": "Get Courier by ID",
-      "method": "GET",
+      "_id": "req_get_cour_001", "_type": "request", "parentId": "fld_couriers_001",
+      "name": "Get Courier by ID", "method": "GET",
       "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Get a specific courier by ID."
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Get a specific courier by ID.",
+      "metaSortKey": -600,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_available_couriers",
-      "_type": "request",
-      "parentId": "fld_couriers",
-      "name": "Get Available Couriers",
-      "method": "GET",
+      "_id": "req_avail_cour_001", "_type": "request", "parentId": "fld_couriers_001",
+      "name": "Get Available Couriers", "method": "GET",
       "url": "{{ _.base_url }}/api/v1/couriers/available",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [
-        { "name": "city", "value": "Melbourne", "disabled": true }
-      ],
-      "description": "Get couriers currently available for delivery.\nOptional query param: city"
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [ { "id": "p15", "name": "city", "value": "Melbourne", "disabled": true } ],
+      "description": "Get couriers currently available for delivery.",
+      "metaSortKey": -500,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_update_courier",
-      "_type": "request",
-      "parentId": "fld_couriers",
-      "name": "Update Courier",
-      "method": "PUT",
+      "_id": "req_upd_cour_001", "_type": "request", "parentId": "fld_couriers_001",
+      "name": "Update Courier", "method": "PUT",
       "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"firstName\": \"Mike\",\n  \"lastName\": \"Rider\",\n  \"address\": {\n    \"street1\": \"200 Elizabeth Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Update courier profile details."
+      "body": { "mimeType": "application/json", "text": "{\n  \"firstName\": \"Mike\",\n  \"lastName\": \"Rider\",\n  \"address\": {\n    \"street1\": \"200 Elizabeth Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}" },
+      "headers": [ { "id": "h27", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Update courier profile details.",
+      "metaSortKey": -400,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_courier_availability",
-      "_type": "request",
-      "parentId": "fld_couriers",
-      "name": "Update Availability",
-      "method": "POST",
+      "_id": "req_avail_toggle_001", "_type": "request", "parentId": "fld_couriers_001",
+      "name": "Update Availability", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}/availability",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"available\": true\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Toggle courier availability for accepting deliveries."
+      "body": { "mimeType": "application/json", "text": "{\n  \"available\": true\n}" },
+      "headers": [ { "id": "h28", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Toggle courier availability for accepting deliveries.",
+      "metaSortKey": -300,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_deactivate_courier",
-      "_type": "request",
-      "parentId": "fld_couriers",
-      "name": "Deactivate Courier",
-      "method": "POST",
+      "_id": "req_deact_cour_001", "_type": "request", "parentId": "fld_couriers_001",
+      "name": "Deactivate Courier", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}/deactivate",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Deactivate a courier account."
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Deactivate a courier account.",
+      "metaSortKey": -200,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_activate_courier",
-      "_type": "request",
-      "parentId": "fld_couriers",
-      "name": "Activate Courier",
-      "method": "POST",
+      "_id": "req_act_cour_001", "_type": "request", "parentId": "fld_couriers_001",
+      "name": "Activate Courier", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}/activate",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
-      "parameters": [],
-      "description": "Reactivate a previously deactivated courier."
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
+      "parameters": [], "description": "Reactivate a previously deactivated courier.",
+      "metaSortKey": -100,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
 
     {
-      "_id": "fld_sagas",
+      "_id": "fld_sagas_001",
       "_type": "request_group",
-      "parentId": "wrk_munchgo",
+      "parentId": "wrk_munchgo_001",
       "name": "Saga Orchestrator (OIDC)",
-      "description": "Saga orchestrator for distributed transactions — Cognito OIDC protected.\nCoordinates order creation across consumer, restaurant, and courier services.\nRate limit: 100 req/min\n\nThis is the primary endpoint for creating orders from the SPA."
+      "description": "Saga orchestrator for distributed transactions — Cognito OIDC protected.\nRate limit: 100 req/min\nThis is the primary endpoint for creating orders from the SPA.",
+      "metaSortKey": -30,
+      "created": 1708099200000,
+      "modified": 1708099200000
     },
     {
-      "_id": "req_saga_create_order",
-      "_type": "request",
-      "parentId": "fld_sagas",
-      "name": "Create Order (Saga)",
-      "method": "POST",
+      "_id": "req_saga_create_001", "_type": "request", "parentId": "fld_sagas_001",
+      "name": "Create Order (Saga)", "method": "POST",
       "url": "{{ _.base_url }}/api/v1/sagas/create-order",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"consumerId\": \"{{ _.consumer_id }}\",\n  \"restaurantId\": \"{{ _.restaurant_id }}\",\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ],\n  \"deliveryAddress\": {\n    \"street1\": \"789 Flinders Lane\",\n    \"street2\": \"Suite 2\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
-      },
-      "headers": [
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": { "mimeType": "application/json", "text": "{\n  \"consumerId\": \"{{ _.consumer_id }}\",\n  \"restaurantId\": \"{{ _.restaurant_id }}\",\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ],\n  \"deliveryAddress\": {\n    \"street1\": \"789 Flinders Lane\",\n    \"street2\": \"Suite 2\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}" },
+      "headers": [ { "id": "h29", "name": "Content-Type", "value": "application/json" } ],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Start a Create Order Saga — orchestrates:\n1. Validate consumer (consumer-service)\n2. Validate order against menu (restaurant-service)\n3. Create order (order-service)\n4. Assign courier (courier-service)\n5. Approve order (order-service)\n\nIf any step fails, compensating transactions roll back previous steps.",
-      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.sagaId) {\n  insomnia.environment.set('saga_id', body.sagaId);\n}\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}"
+      "description": "Start a Create Order Saga — orchestrates validation, order creation, courier assignment.\nIf any step fails, compensating transactions roll back.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.sagaId) {\n  insomnia.environment.set('saga_id', body.sagaId);\n}\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}",
+      "metaSortKey": -200,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     },
     {
-      "_id": "req_saga_status",
-      "_type": "request",
-      "parentId": "fld_sagas",
-      "name": "Get Saga Status",
-      "method": "GET",
+      "_id": "req_saga_status_001", "_type": "request", "parentId": "fld_sagas_001",
+      "name": "Get Saga Status", "method": "GET",
       "url": "{{ _.base_url }}/api/v1/sagas/{{ _.saga_id }}",
-      "body": {},
-      "headers": [],
-      "authentication": {
-        "type": "bearer",
-        "token": "{{ _.access_token }}"
-      },
+      "body": {}, "headers": [],
+      "authentication": { "type": "bearer", "token": "{{ _.access_token }}" },
       "parameters": [],
-      "description": "Check the status of a running or completed saga.\nStates: STARTED, COMPLETED, COMPENSATING, FAILED"
+      "description": "Check the status of a running or completed saga.\nStates: STARTED, COMPLETED, COMPENSATING, FAILED",
+      "metaSortKey": -100,
+      "isPrivate": false, "settingEncodeUrl": true, "settingFollowRedirects": "global", "settingSendCookies": true, "settingStoreCookies": true, "settingRebuildPath": true, "created": 1708099200000, "modified": 1708099200000
     }
   ]
 }
