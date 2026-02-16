@@ -99,7 +99,7 @@ spec:
 
 ---
 # Restrict Saga Orchestrator — only reachable from within munchgo namespace
-# and from Istio Gateway (for status/monitoring endpoints)
+# and from Istio Gateway (north-south ingress for /api/v1/sagas)
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:

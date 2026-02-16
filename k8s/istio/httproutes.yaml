@@ -14,6 +14,7 @@
 #   /api/v1/restaurants/*→ munchgo-restaurant-service                — GET public, POST/PUT JWT
 #   /api/v1/orders/*     → munchgo-order-service                     — JWT protected
 #   /api/v1/couriers/*   → munchgo-courier-service                   — JWT protected
+#   /api/v1/sagas/*      → munchgo-order-saga-orchestrator           — JWT protected
 #
 # Note: JWT authentication is handled at Kong API Gateway level (not here)
 
@@ -136,6 +137,26 @@ spec:
             value: /api/v1/couriers
       backendRefs:
         - name: munchgo-courier-service
+          port: 8080
+
+---
+# Saga Orchestrator Route - /api/v1/sagas (JWT protected, order creation)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sagas-route
+  namespace: munchgo
+spec:
+  parentRefs:
+    - name: kong-cloud-gw-gateway
+      namespace: istio-ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/sagas
+      backendRefs:
+        - name: munchgo-order-saga-orchestrator
           port: 8080
 
 ---

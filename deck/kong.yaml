@@ -19,6 +19,7 @@
 #   /api/v1/restaurants  → Restaurant Service (Cognito OIDC + anonymous guest browsing)
 #   /api/v1/orders       → Order Service (Cognito OIDC protected, CQRS)
 #   /api/v1/couriers     → Courier Service (Cognito OIDC protected)
+#   /api/v1/sagas        → Saga Orchestrator (Cognito OIDC protected, order creation)
 #   /healthz             → Health Responder (platform health check)
 #
 # Authentication (Amazon Cognito + Kong OpenID Connect):
@@ -349,6 +350,65 @@ services:
             - POST
             - PUT
             - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          max_age: 3600
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Kong-Proxy: true"
+              - "X-Request-Source: cloud-gateway"
+
+  # --------------------------------------------------------------------------
+  # Saga Orchestrator — Cognito OIDC Protected (order creation)
+  # --------------------------------------------------------------------------
+  # The SPA creates orders via the saga orchestrator, which coordinates
+  # the distributed transaction across consumer, restaurant, and courier services.
+  - name: munchgo-sagas
+    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    protocol: http
+    port: 80
+    routes:
+      - name: sagas-route
+        paths:
+          - /api/v1/sagas
+        strip_path: false
+        protocols:
+          - https
+          - http
+    plugins:
+      - name: openid-connect
+        config:
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          auth_methods:
+            - bearer
+          bearer_token_param_type:
+            - header
+          cache_ttl: 300
+          upstream_headers_claims:
+            - sub
+            - email
+            - custom:roles
+          upstream_headers_names:
+            - X-User-Sub
+            - X-User-Email
+            - X-User-Roles
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
             - OPTIONS
           headers:
             - Authorization
