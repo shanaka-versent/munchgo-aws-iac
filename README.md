@@ -1304,17 +1304,45 @@ curl -H "Authorization: Bearer $ACCESS_TOKEN" $APP_URL/api/v1/orders
 
 ## API Testing — Insomnia Collection
 
-An [Insomnia](https://insomnia.rest/) collection is included at [`insomnia/munchgo-api.json`](insomnia/munchgo-api.json) with **49 requests** covering all MunchGo API endpoints.
+An [Insomnia](https://insomnia.rest/) collection is included at [`insomnia/munchgo-api.json`](insomnia/munchgo-api.json) with **49+ requests** covering all MunchGo API endpoints.
 
 ### Import & Setup
 
 1. Open Insomnia → **Import** → select `insomnia/munchgo-api.json`
-2. Set the `base_url` environment variable to your CloudFront domain (e.g., `https://dxxxxxxxxx.cloudfront.net`)
+2. Press `Ctrl+E` / `Cmd+E` → set `base_url` to your CloudFront domain (e.g., `https://dxxxxxxxxx.cloudfront.net`)
+
+### One-Click Test — Collection Runner
+
+The **"Run: Full Order Lifecycle"** folder contains 13 numbered requests that execute the complete order flow in sequence:
+
+```
+01. Health Check       → verify connectivity
+02. Register User      → create test user in Cognito
+03. Login              → capture tokens (auto-sets access_token)
+04. Create Consumer    → auto-sets consumer_id
+05. Create Restaurant  → auto-sets restaurant_id
+06. Add Menu Item      → populate menu
+07. Create Courier     → auto-sets courier_id
+08. Set Available      → courier ready for deliveries
+09. Create Order Saga  → auto-sets saga_id + order_id
+10. Check Saga Status  → verify COMPLETED
+11. Verify Order       → confirm order created
+12. Accept Order       → restaurant accepts
+13. Mark Delivered     → order lifecycle complete
+```
+
+**To run all 13 in one click:**
+1. Click the **Runner** tab (top of Insomnia, next to "Debug")
+2. Select the **"Run: Full Order Lifecycle"** folder
+3. Click **Run** — all requests execute sequentially, passing IDs via environment variables
+
+After-response scripts automatically chain: login captures tokens → create requests capture entity IDs → subsequent requests use those IDs.
 
 ### Collection Structure
 
 | Folder | Endpoints | Auth | Description |
 |--------|-----------|------|-------------|
+| **Run: Full Order Lifecycle** | 13 | Auto-chained | One-click end-to-end test (use Runner tab) |
 | **Health** | 1 | None | `/healthz` platform health check |
 | **Auth Service** | 5 | None (public) | Register, login, refresh, logout, profile |
 | **Consumer Service** | 8 | OIDC Bearer | CRUD + validate, activate, deactivate |
@@ -1324,23 +1352,7 @@ An [Insomnia](https://insomnia.rest/) collection is included at [`insomnia/munch
 | **Courier Service** | 8 | OIDC Bearer | CRUD + availability, activate, deactivate |
 | **Saga Orchestrator** | 2 | OIDC Bearer | Create order saga, get saga status |
 
-### Recommended Test Flow
-
-Run requests in this order to test the full order lifecycle:
-
-1. `POST /api/v1/auth/register` — create a test user
-2. `POST /api/v1/auth/login` — get tokens (auto-populates `access_token`)
-3. `POST /api/v1/consumers` — create consumer (auto-populates `consumer_id`)
-4. `POST /api/v1/restaurants` — create restaurant (auto-populates `restaurant_id`)
-5. `POST /api/v1/restaurants/{id}/menu-items` — add menu items
-6. `POST /api/v1/couriers` — create courier (auto-populates `courier_id`)
-7. `POST /api/v1/couriers/{id}/availability` — set courier available
-8. `POST /api/v1/sagas/create-order` — start order saga (auto-populates `saga_id`, `order_id`)
-9. `GET /api/v1/sagas/{id}` — check saga completion
-10. `GET /api/v1/orders/{id}` — verify order created
-11. `POST /api/v1/orders/{id}/accept` → `preparing` → `ready-for-pickup` → `picked-up` → `delivered`
-
-> **Note:** Login, create-consumer, create-restaurant, create-courier, create-order, and create-saga requests include after-response scripts that automatically capture IDs into environment variables for chaining.
+> **Note:** Individual service folders also contain after-response scripts for ID chaining when running requests manually.
 
 ---
 

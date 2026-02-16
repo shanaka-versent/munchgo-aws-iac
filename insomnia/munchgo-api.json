@@ -9,7 +9,7 @@
       "_type": "workspace",
       "parentId": null,
       "name": "MunchGo API Collection",
-      "description": "MunchGo Microservices — Kong Cloud Gateway + CloudFront + Istio Ambient Mesh\n\nSetup:\n1. Set base_url to your CloudFront domain (e.g., https://dxxxxxxxxx.cloudfront.net)\n2. Run Register → Login to get tokens\n3. Login response auto-populates access_token, refresh_token, user_id\n4. Use captured IDs for subsequent requests",
+      "description": "MunchGo Microservices — Kong Cloud Gateway + CloudFront + Istio Ambient Mesh\n\nSetup:\n1. Set base_url in Manage Environments (Ctrl+E / Cmd+E)\n2. Use the 'Run: Full Order Lifecycle' folder for one-click testing\n   → Right-click the folder → Run Tests (or use the Runner tab)\n3. The runner executes all 13 requests in order: register → login → create data → place order → deliver",
       "scope": "collection"
     },
     {
@@ -32,6 +32,263 @@
       "dataPropertyOrder": {
         "&": ["base_url", "access_token", "refresh_token", "user_id", "consumer_id", "restaurant_id", "order_id", "courier_id", "saga_id", "menu_item_id"]
       }
+    },
+
+    {
+      "_id": "fld_runner",
+      "_type": "request_group",
+      "parentId": "wrk_munchgo",
+      "name": "Run: Full Order Lifecycle",
+      "description": "ONE-CLICK TEST FLOW — Run all 13 requests sequentially.\n\nHow to run:\n1. Right-click this folder → 'Run Tests'\n   OR click the Runner tab at the top → select this folder → Run\n2. All requests execute in order, each passing IDs to the next via environment variables.\n\nFlow: Health → Register → Login → Create Consumer → Create Restaurant → Add Menu → Create Courier → Set Available → Create Order (Saga) → Check Saga → Verify Order → Accept → Deliver"
+    },
+    {
+      "_id": "run_01_health",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "01. Health Check",
+      "method": "GET",
+      "url": "{{ _.base_url }}/healthz",
+      "body": {},
+      "headers": [],
+      "authentication": {},
+      "parameters": [],
+      "description": "Verify platform connectivity. Expected: \"healthy\""
+    },
+    {
+      "_id": "run_02_register",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "02. Register User",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/auth/register",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"username\": \"testrunner\",\n  \"email\": \"testrunner@example.com\",\n  \"password\": \"Test@1234\",\n  \"role\": \"CONSUMER\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"Runner\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {},
+      "parameters": [],
+      "description": "Register a test user in Cognito."
+    },
+    {
+      "_id": "run_03_login",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "03. Login",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/auth/login",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"testrunner@example.com\",\n  \"password\": \"Test@1234\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {},
+      "parameters": [],
+      "description": "Login and capture tokens. After-response script sets access_token, refresh_token, user_id.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}\nif (body.refreshToken) {\n  insomnia.environment.set('refresh_token', body.refreshToken);\n}\nif (body.userId) {\n  insomnia.environment.set('user_id', body.userId);\n}"
+    },
+    {
+      "_id": "run_04_create_consumer",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "04. Create Consumer",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/consumers",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phoneNumber\": \"+61412345678\",\n  \"address\": {\n    \"street1\": \"123 Collins Street\",\n    \"street2\": \"Level 5\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Create consumer profile. Captures consumer_id.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.consumerId) {\n  insomnia.environment.set('consumer_id', body.consumerId);\n}"
+    },
+    {
+      "_id": "run_05_create_restaurant",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "05. Create Restaurant",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/restaurants",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Melbourne Burger House\",\n  \"address\": {\n    \"street1\": \"100 Lygon Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3053\",\n    \"country\": \"AU\"\n  },\n  \"orderMinimum\": 15.00\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Create restaurant. Captures restaurant_id.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.restaurantId) {\n  insomnia.environment.set('restaurant_id', body.restaurantId);\n}"
+    },
+    {
+      "_id": "run_06_add_menu",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "06. Add Menu Item",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/menu-items",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"menuItemId\": \"burger-01\",\n  \"name\": \"Classic Cheeseburger\",\n  \"price\": 18.50,\n  \"description\": \"Angus beef patty with cheddar, lettuce, tomato, and house sauce\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Add a menu item to the restaurant."
+    },
+    {
+      "_id": "run_07_create_courier",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "07. Create Courier",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/couriers",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"firstName\": \"Mike\",\n  \"lastName\": \"Rider\",\n  \"address\": {\n    \"street1\": \"50 Spencer Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Create courier profile. Captures courier_id.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.courierId) {\n  insomnia.environment.set('courier_id', body.courierId);\n}"
+    },
+    {
+      "_id": "run_08_courier_available",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "08. Set Courier Available",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}/availability",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"available\": true\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Mark courier as available for deliveries."
+    },
+    {
+      "_id": "run_09_create_order_saga",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "09. Create Order (Saga)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/sagas/create-order",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"consumerId\": \"{{ _.consumer_id }}\",\n  \"restaurantId\": \"{{ _.restaurant_id }}\",\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ],\n  \"deliveryAddress\": {\n    \"street1\": \"789 Flinders Lane\",\n    \"street2\": \"Suite 2\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Start Create Order Saga. Captures saga_id and order_id.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.sagaId) {\n  insomnia.environment.set('saga_id', body.sagaId);\n}\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}"
+    },
+    {
+      "_id": "run_10_saga_status",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "10. Check Saga Status",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/sagas/{{ _.saga_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Verify saga completed successfully. Expected state: COMPLETED"
+    },
+    {
+      "_id": "run_11_verify_order",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "11. Verify Order Created",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Verify the order was created by the saga."
+    },
+    {
+      "_id": "run_12_accept_order",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "12. Accept Order",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/accept",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"readyBy\": \"2026-02-16T19:30:00Z\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Restaurant accepts the order ticket."
+    },
+    {
+      "_id": "run_13_delivered",
+      "_type": "request",
+      "parentId": "fld_runner",
+      "name": "13. Mark Delivered",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/delivered",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Order delivered — full lifecycle complete."
     },
 
     {
@@ -96,9 +353,8 @@
       ],
       "authentication": {},
       "parameters": [],
-      "description": "Authenticate user via Cognito ADMIN_USER_PASSWORD_AUTH flow.\nReturns: accessToken, idToken, refreshToken, userId\n\nAfter sending, update environment variables:\n- access_token → response.accessToken\n- refresh_token → response.refreshToken\n- user_id → response.userId",
-      "settingFollowRedirects": "global",
-      "afterResponseScript": "const res = pm.response.json();\nif (res.accessToken) {\n  pm.environment.set('access_token', res.accessToken);\n}\nif (res.refreshToken) {\n  pm.environment.set('refresh_token', res.refreshToken);\n}\nif (res.userId) {\n  pm.environment.set('user_id', res.userId);\n}"
+      "description": "Authenticate user via Cognito ADMIN_USER_PASSWORD_AUTH flow.\nReturns: accessToken, idToken, refreshToken, userId\n\nAfter-response script auto-populates:\n- access_token\n- refresh_token\n- user_id",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}\nif (body.refreshToken) {\n  insomnia.environment.set('refresh_token', body.refreshToken);\n}\nif (body.userId) {\n  insomnia.environment.set('user_id', body.userId);\n}"
     },
     {
       "_id": "req_refresh",
@@ -117,7 +373,7 @@
       "authentication": {},
       "parameters": [],
       "description": "Refresh Cognito tokens using the refresh token.\nReturns new accessToken and idToken (refresh token stays the same).",
-      "afterResponseScript": "const res = pm.response.json();\nif (res.accessToken) {\n  pm.environment.set('access_token', res.accessToken);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.accessToken) {\n  insomnia.environment.set('access_token', body.accessToken);\n}"
     },
     {
       "_id": "req_logout",
@@ -172,8 +428,8 @@
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Create a new consumer profile.\nAfter sending, copy the consumerId from the response into the consumer_id environment variable.",
-      "afterResponseScript": "const res = pm.response.json();\nif (res.consumerId) {\n  pm.environment.set('consumer_id', res.consumerId);\n}"
+      "description": "Create a new consumer profile.\nAfter-response script auto-populates consumer_id.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.consumerId) {\n  insomnia.environment.set('consumer_id', body.consumerId);\n}"
     },
     {
       "_id": "req_list_consumers",
@@ -324,8 +580,8 @@
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Create a new restaurant. Requires RESTAURANT_OWNER role.",
-      "afterResponseScript": "const res = pm.response.json();\nif (res.restaurantId) {\n  pm.environment.set('restaurant_id', res.restaurantId);\n}"
+      "description": "Create a new restaurant. Requires RESTAURANT_OWNER role.\nAfter-response script auto-populates restaurant_id.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.restaurantId) {\n  insomnia.environment.set('restaurant_id', body.restaurantId);\n}"
     },
     {
       "_id": "req_list_restaurants",
@@ -642,7 +898,7 @@
       },
       "parameters": [],
       "description": "Create an order directly (bypasses saga orchestration).\nFor production use, prefer POST /api/v1/sagas/create-order which coordinates validation across services.",
-      "afterResponseScript": "const res = pm.response.json();\nif (res.orderId) {\n  pm.environment.set('order_id', res.orderId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}"
     },
     {
       "_id": "req_approve_order",
@@ -819,8 +1075,8 @@
         "token": "{{ _.access_token }}"
       },
       "parameters": [],
-      "description": "Create a new courier profile.",
-      "afterResponseScript": "const res = pm.response.json();\nif (res.courierId) {\n  pm.environment.set('courier_id', res.courierId);\n}"
+      "description": "Create a new courier profile.\nAfter-response script auto-populates courier_id.",
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.courierId) {\n  insomnia.environment.set('courier_id', body.courierId);\n}"
     },
     {
       "_id": "req_list_couriers",
@@ -974,7 +1230,7 @@
       },
       "parameters": [],
       "description": "Start a Create Order Saga — orchestrates:\n1. Validate consumer (consumer-service)\n2. Validate order against menu (restaurant-service)\n3. Create order (order-service)\n4. Assign courier (courier-service)\n5. Approve order (order-service)\n\nIf any step fails, compensating transactions roll back previous steps.",
-      "afterResponseScript": "const res = pm.response.json();\nif (res.sagaId) {\n  pm.environment.set('saga_id', res.sagaId);\n}\nif (res.orderId) {\n  pm.environment.set('order_id', res.orderId);\n}"
+      "afterResponseScript": "const body = JSON.parse(insomnia.response.body);\nif (body.sagaId) {\n  insomnia.environment.set('saga_id', body.sagaId);\n}\nif (body.orderId) {\n  insomnia.environment.set('order_id', body.orderId);\n}"
     },
     {
       "_id": "req_saga_status",
