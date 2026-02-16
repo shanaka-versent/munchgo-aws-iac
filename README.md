@@ -80,11 +80,12 @@ graph TB
     Kong -->|HTTPS via TGW| TGW
     TGW --> NLB
     NLB --> IGW
-    IGW -->|HTTPRoute /api/auth| AUTH
-    IGW -->|HTTPRoute /api/consumers| CONSUMER
-    IGW -->|HTTPRoute /api/restaurants| RESTAURANT
-    IGW -->|HTTPRoute /api/orders| ORDER
-    IGW -->|HTTPRoute /api/couriers| COURIER
+    IGW -->|HTTPRoute /api/v1/auth| AUTH
+    IGW -->|HTTPRoute /api/v1/consumers| CONSUMER
+    IGW -->|HTTPRoute /api/v1/restaurants| RESTAURANT
+    IGW -->|HTTPRoute /api/v1/orders| ORDER
+    IGW -->|HTTPRoute /api/v1/couriers| COURIER
+    IGW -->|HTTPRoute /api/v1/sagas| SAGA
 
     AUTH -.->|Cognito Admin API| COGNITO
     AUTH -.->|Kafka Events| MSK
@@ -326,9 +327,9 @@ Four policies enforce the communication matrix:
 
 | Policy | What It Does |
 |--------|-------------|
-| `allow-gateway-ingress` | Istio Gateway (istio-ingress namespace) can reach all 5 API services |
+| `allow-gateway-ingress` | Istio Gateway (istio-ingress namespace) can reach all 5 backend services |
 | `allow-saga-orchestrator` | Saga Orchestrator service account can call Consumer, Restaurant, Order, Courier |
-| `restrict-saga-orchestrator` | Saga Orchestrator only reachable from within munchgo namespace + Istio Gateway |
+| `restrict-saga-orchestrator` | Saga Orchestrator reachable from within munchgo namespace + Istio Gateway (north-south ingress for `/api/v1/sagas`) |
 | `allow-health-checks` | Any source can reach `/actuator/health/*` endpoints (for K8s probes) |
 
 **Default deny**: any traffic not explicitly allowed is blocked. If Consumer Service tried to call Order Service via HTTP, the waypoint would reject it — only Saga Orchestrator has that permission.
@@ -443,11 +444,12 @@ graph TB
         DB[("Amazon RDS PostgreSQL 16<br/>Shared Instance · 6 Databases")]
     end
 
-    KONG -->|/api/auth — Public| AUTH3
-    KONG -->|/api/consumers — OIDC| CONSUMER3
-    KONG -->|/api/restaurants — OIDC| RESTAURANT3
-    KONG -->|/api/orders — OIDC| ORDER3
-    KONG -->|/api/couriers — OIDC| COURIER3
+    KONG -->|/api/v1/auth — Public| AUTH3
+    KONG -->|/api/v1/consumers — OIDC| CONSUMER3
+    KONG -->|/api/v1/restaurants — OIDC| RESTAURANT3
+    KONG -->|/api/v1/orders — OIDC| ORDER3
+    KONG -->|/api/v1/couriers — OIDC| COURIER3
+    KONG -->|/api/v1/sagas — OIDC| SAGA3
 
     SAGA3 -->|"HTTP GET (Istio mTLS)"| CONSUMER3
     SAGA3 -->|"HTTP GET (Istio mTLS)"| RESTAURANT3
@@ -488,12 +490,12 @@ graph TB
 
 | Service | Port | Database | Kong Route | Auth | Pattern |
 |---------|------|----------|------------|------|---------|
-| **auth-service** | 8080 | munchgo_auth | `/api/auth` | Public | Cognito facade |
-| **consumer-service** | 8080 | munchgo_consumers | `/api/consumers` | OIDC | CRUD |
-| **restaurant-service** | 8080 | munchgo_restaurants | `/api/restaurants` | OIDC | CRUD |
-| **order-service** | 8080 | munchgo_orders | `/api/orders` | OIDC | CQRS + Event Sourcing |
-| **courier-service** | 8080 | munchgo_couriers | `/api/couriers` | OIDC | CRUD |
-| **saga-orchestrator** | 8080 | munchgo_sagas | *Internal only* | Mesh mTLS | Saga Orchestration |
+| **auth-service** | 8080 | munchgo_auth | `/api/v1/auth` | Public | Cognito facade |
+| **consumer-service** | 8080 | munchgo_consumers | `/api/v1/consumers` | OIDC | CRUD |
+| **restaurant-service** | 8080 | munchgo_restaurants | `/api/v1/restaurants` | OIDC | CRUD |
+| **order-service** | 8080 | munchgo_orders | `/api/v1/orders` | OIDC | CQRS + Event Sourcing |
+| **courier-service** | 8080 | munchgo_couriers | `/api/v1/couriers` | OIDC | CRUD |
+| **saga-orchestrator** | 8080 | munchgo_sagas | `/api/v1/sagas` | OIDC | Saga Orchestration |
 
 ### Authentication — Amazon Cognito + OIDC
 
@@ -554,7 +556,7 @@ sequenceDiagram
     participant CS as consumer-service
     participant CR as courier-service
 
-    C->>CF: POST /api/auth/register<br/>{ email, password, firstName, lastName, role }
+    C->>CF: POST /api/v1/auth/register<br/>{ email, password, firstName, lastName, role }
     CF->>Kong: Forward (WAF inspected)
     Kong->>Auth: Forward (public route — no OIDC)
 
@@ -591,7 +593,7 @@ sequenceDiagram
     participant Auth as auth-service
     participant Cognito as Amazon Cognito
 
-    C->>CF: POST /api/auth/login { email, password }
+    C->>CF: POST /api/v1/auth/login { email, password }
     CF->>Kong: Forward (WAF inspected)
     Kong->>Auth: Forward (public route — no OIDC)
     Auth->>Auth: Find local user by email
@@ -614,7 +616,7 @@ sequenceDiagram
     participant Kong as Kong Gateway
     participant Svc as order-service
 
-    C->>CF: GET /api/orders<br/>Authorization: Bearer <access_token>
+    C->>CF: GET /api/v1/orders<br/>Authorization: Bearer <access_token>
     CF->>Kong: Forward (WAF inspected)
 
     rect rgb(255, 248, 240)
@@ -645,13 +647,13 @@ sequenceDiagram
     participant Cognito as Amazon Cognito
 
     Note over C,Cognito: Token Refresh (public route)
-    C->>Auth: POST /api/auth/refresh { refreshToken }
+    C->>Auth: POST /api/v1/auth/refresh { refreshToken }
     Auth->>Cognito: InitiateAuth (REFRESH_TOKEN_AUTH)
     Cognito-->>Auth: New accessToken + idToken
     Auth-->>C: { accessToken, idToken }
 
     Note over C,Cognito: Logout — Global Sign Out
-    C->>Auth: POST /api/auth/logout/{userId}
+    C->>Auth: POST /api/v1/auth/logout/{userId}
     Auth->>Auth: Lookup user email
     Auth->>Cognito: AdminUserGlobalSignOut(email)
     Cognito->>Cognito: Invalidate ALL tokens for user
@@ -673,8 +675,8 @@ sequenceDiagram
 - Auto-discovers Cognito JWKS via `.well-known/openid-configuration`
 - Validates token signature, expiry, and issuer
 - Forwards claims as upstream headers: `X-User-Sub`, `X-User-Email`, `X-User-Roles`
-- Protected routes: `/api/consumers`, `/api/orders`, `/api/couriers`, `/api/restaurants`
-- Public routes: `/api/auth/*` (register, login, refresh, logout), `/healthz`
+- Protected routes: `/api/v1/consumers`, `/api/v1/orders`, `/api/v1/couriers`, `/api/v1/restaurants`, `/api/v1/sagas`
+- Public routes: `/api/v1/auth/*` (register, login, refresh, logout), `/healthz`
 - JWKS cache TTL: 300s — automatic key rotation with zero downtime
 
 **auth-service IRSA:**
@@ -699,9 +701,9 @@ sequenceDiagram
     participant CR as courier-service
 
     Note over C,Kong: North-South (JWT verified by Kong)
-    C->>Kong: POST /api/orders
+    C->>Kong: POST /api/v1/sagas/create-order
     Kong->>IG: Forward (JWT valid)
-    IG->>S: HTTPRoute → saga-orchestrator
+    IG->>S: HTTPRoute /api/v1/sagas → saga-orchestrator
 
     Note over S,CS: East-West HTTP (Istio mTLS + Waypoint AuthZ)
     rect rgb(240, 248, 255)
@@ -750,7 +752,7 @@ sequenceDiagram
 
 ### MunchGo React SPA
 
-The frontend is a **React 19 + TypeScript** single-page application served from **S3 via CloudFront**. Static assets never touch Kong — only `/api/*` requests are proxied to Kong Cloud Gateway.
+The frontend is a **React 19 + TypeScript** single-page application served from **S3 via CloudFront**. Static assets never touch Kong — only `/api/*` and `/healthz` requests are proxied to Kong Cloud Gateway.
 
 | Technology | Version | Purpose |
 |-----------|---------|---------|
@@ -765,6 +767,7 @@ The frontend is a **React 19 + TypeScript** single-page application served from 
 - `/` → S3 (React SPA `index.html`)
 - `/assets/*` → S3 (hashed JS/CSS with 1-year immutable cache)
 - `/api/*` → Kong Cloud Gateway (API requests, no cache)
+- `/healthz` → Kong Cloud Gateway (platform health check)
 
 **Features:**
 - Cognito authentication (login, register, token refresh, logout)
@@ -1019,7 +1022,7 @@ gantt
 | 0 | istiod, istio-cni, ztunnel | Ambient mesh control + data plane |
 | 1 | namespaces | `munchgo`, `external-secrets`, `observability` (ambient labeled) |
 | 5 | gateway | Istio Gateway → creates single internal NLB |
-| 6 | httproutes | `/api/auth`, `/api/consumers`, `/api/restaurants`, `/api/orders`, `/api/couriers` |
+| 6 | httproutes | `/api/v1/auth`, `/api/v1/consumers`, `/api/v1/restaurants`, `/api/v1/orders`, `/api/v1/couriers`, `/api/v1/sagas` |
 | 7 | platform-apps | health-responder |
 | 8 | external-secrets, munchgo-apps | ESO Helm chart + MunchGo services (from GitOps repo) |
 | 9 | external-secrets-config | ClusterSecretStore + ExternalSecrets (DB credentials) |
@@ -1236,20 +1239,14 @@ This script **automatically reads all Terraform outputs** and populates every pl
 | `k8s/external-secrets/munchgo-db-secret.yaml` | All 7 `PLACEHOLDER-munchgo-*-db` secrets |
 | `munchgo-k8s-config/overlays/dev/auth-service/kustomization.yaml` | `COGNITO_AUTH_SERVICE_ROLE_ARN` |
 
-The script also **seeds the default admin user** (`admin@munchgo.com` / `Admin@123`) in Cognito and the auth-service database. To run it separately: `./scripts/04-seed-admin-user.sh`.
+The script also:
+- **Creates the Kafka config secret** from MSK bootstrap brokers (for services to connect to MSK)
+- **Syncs Kong routes to Konnect** via `deck gateway sync` (requires `KONNECT_TOKEN` in `.env`)
+- **Seeds the default admin user** (`admin@munchgo.com` / `Admin@123`) in Cognito and the auth-service database. To run it separately: `./scripts/04-seed-admin-user.sh`.
 
 > The script waits for the Istio Gateway NLB to be provisioned before replacing `PLACEHOLDER_NLB_DNS`. If the NLB isn't ready, it skips that placeholder and you can re-run the script later.
 
-### Step 7: Sync Kong Configuration
-
-Push the populated config to Kong Konnect:
-
-```bash
-deck gateway sync deck/kong.yaml \
-  --konnect-addr https://${KONNECT_REGION}.api.konghq.com \
-  --konnect-token $KONNECT_TOKEN \
-  --konnect-control-plane-name $KONNECT_CONTROL_PLANE_NAME
-```
+### Step 7: Commit & Push Populated Config
 
 Commit the populated files so ArgoCD picks up the ExternalSecret changes:
 
@@ -1298,7 +1295,7 @@ Client → CloudFront (WAF) → Kong Cloud Gateway (OIDC) → Transit GW → NLB
 Registers a test user in Cognito and returns access/ID/refresh tokens. Use the access token to test protected APIs:
 
 ```bash
-curl -H "Authorization: Bearer $ACCESS_TOKEN" $APP_URL/api/orders
+curl -H "Authorization: Bearer $ACCESS_TOKEN" $APP_URL/api/v1/orders
 ```
 
 ---
@@ -1342,11 +1339,11 @@ kubectl get serviceaccount munchgo-auth-service -n munchgo -o yaml | grep role-a
 # End-to-end: public health check
 export APP_URL=$(terraform -chdir=terraform output -raw application_url)
 curl $APP_URL/healthz
-curl $APP_URL/api/auth/health
+curl $APP_URL/api/v1/auth/health
 
 # End-to-end: authenticated API call
 ./scripts/02-generate-jwt.sh
-curl -H "Authorization: Bearer $ACCESS_TOKEN" $APP_URL/api/orders
+curl -H "Authorization: Bearer $ACCESS_TOKEN" $APP_URL/api/v1/orders
 ```
 
 ---
