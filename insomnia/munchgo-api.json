@@ -20,7 +20,7 @@
       "parentId": "wrk_munchgo_001",
       "name": "Base Environment",
       "data": {
-        "base_url": "https://dxxxxxxxxx.cloudfront.net",
+        "base_url": "https://d29r7pgg6vs29b.cloudfront.net",
         "access_token": "",
         "refresh_token": "",
         "user_id": "",
