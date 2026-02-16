@@ -409,7 +409,8 @@ resource "aws_cloudformation_stack" "cloudfront" {
 
           # When S3 SPA is enabled:
           #   Default behavior → S3 (serves React SPA)
-          #   /api/* → Kong Cloud Gateway (API requests)
+          #   /api/*   → Kong Cloud Gateway (API requests)
+          #   /healthz → Kong Cloud Gateway (platform health check)
           # When S3 SPA is disabled:
           #   Default behavior → Kong Cloud Gateway (all traffic)
           DefaultCacheBehavior: !If
@@ -434,6 +435,15 @@ resource "aws_cloudformation_stack" "cloudfront" {
             - HasS3Origin
             - - PathPattern: "/api/*"
                 AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+                CachedMethods: [GET, HEAD]
+                TargetOriginId: KongCloudGateway
+                CachePolicyId: !Ref CachePolicyId
+                OriginRequestPolicyId: !Ref OriginRequestPolicyId
+                ResponseHeadersPolicyId: !Ref ResponseHeadersPolicyId
+                ViewerProtocolPolicy: redirect-to-https
+                Compress: true
+              - PathPattern: "/healthz"
+                AllowedMethods: [GET, HEAD, OPTIONS]
                 CachedMethods: [GET, HEAD]
                 TargetOriginId: KongCloudGateway
                 CachePolicyId: !Ref CachePolicyId
