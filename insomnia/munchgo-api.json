@@ -1,0 +1,996 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-02-16T00:00:00.000Z",
+  "__export_source": "insomnia.desktop.app:v2024.7.0",
+  "resources": [
+    {
+      "_id": "wrk_munchgo",
+      "_type": "workspace",
+      "parentId": null,
+      "name": "MunchGo API Collection",
+      "description": "MunchGo Microservices — Kong Cloud Gateway + CloudFront + Istio Ambient Mesh\n\nSetup:\n1. Set base_url to your CloudFront domain (e.g., https://dxxxxxxxxx.cloudfront.net)\n2. Run Register → Login to get tokens\n3. Login response auto-populates access_token, refresh_token, user_id\n4. Use captured IDs for subsequent requests",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_base",
+      "_type": "environment",
+      "parentId": "wrk_munchgo",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "https://dxxxxxxxxx.cloudfront.net",
+        "access_token": "",
+        "refresh_token": "",
+        "user_id": "",
+        "consumer_id": "",
+        "restaurant_id": "",
+        "order_id": "",
+        "courier_id": "",
+        "saga_id": "",
+        "menu_item_id": "burger-01"
+      },
+      "dataPropertyOrder": {
+        "&": ["base_url", "access_token", "refresh_token", "user_id", "consumer_id", "restaurant_id", "order_id", "courier_id", "saga_id", "menu_item_id"]
+      }
+    },
+
+    {
+      "_id": "fld_health",
+      "_type": "request_group",
+      "parentId": "wrk_munchgo",
+      "name": "Health",
+      "description": "Platform health check — public, no auth required"
+    },
+    {
+      "_id": "req_healthz",
+      "_type": "request",
+      "parentId": "fld_health",
+      "name": "Health Check",
+      "method": "GET",
+      "url": "{{ _.base_url }}/healthz",
+      "body": {},
+      "headers": [],
+      "authentication": {},
+      "parameters": [],
+      "description": "Platform health endpoint routed through CloudFront → Kong → Istio → health-responder pod.\nExpected response: \"healthy\""
+    },
+
+    {
+      "_id": "fld_auth",
+      "_type": "request_group",
+      "parentId": "wrk_munchgo",
+      "name": "Auth Service (Public)",
+      "description": "Public authentication endpoints — no OIDC token required.\nAuth service proxies to Amazon Cognito for user management.\nRate limit: 60 req/min"
+    },
+    {
+      "_id": "req_register",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Register User",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/auth/register",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"username\": \"testuser\",\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test@1234\",\n  \"role\": \"CONSUMER\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {},
+      "parameters": [],
+      "description": "Register a new user in Amazon Cognito.\nRoles: CONSUMER, RESTAURANT_OWNER, COURIER, ADMIN\nPre Token Lambda adds custom:roles claim to the JWT."
+    },
+    {
+      "_id": "req_login",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Login",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/auth/login",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test@1234\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {},
+      "parameters": [],
+      "description": "Authenticate user via Cognito ADMIN_USER_PASSWORD_AUTH flow.\nReturns: accessToken, idToken, refreshToken, userId\n\nAfter sending, update environment variables:\n- access_token → response.accessToken\n- refresh_token → response.refreshToken\n- user_id → response.userId",
+      "settingFollowRedirects": "global",
+      "afterResponseScript": "const res = pm.response.json();\nif (res.accessToken) {\n  pm.environment.set('access_token', res.accessToken);\n}\nif (res.refreshToken) {\n  pm.environment.set('refresh_token', res.refreshToken);\n}\nif (res.userId) {\n  pm.environment.set('user_id', res.userId);\n}"
+    },
+    {
+      "_id": "req_refresh",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Refresh Token",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/auth/refresh",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"refreshToken\": \"{{ _.refresh_token }}\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {},
+      "parameters": [],
+      "description": "Refresh Cognito tokens using the refresh token.\nReturns new accessToken and idToken (refresh token stays the same).",
+      "afterResponseScript": "const res = pm.response.json();\nif (res.accessToken) {\n  pm.environment.set('access_token', res.accessToken);\n}"
+    },
+    {
+      "_id": "req_logout",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Logout",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/auth/logout/{{ _.user_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {},
+      "parameters": [],
+      "description": "Revoke all Cognito tokens for the user (AdminUserGlobalSignOut).\nAll existing access/refresh tokens become invalid."
+    },
+    {
+      "_id": "req_profile",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Get Profile",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/auth/profile/{{ _.user_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {},
+      "parameters": [],
+      "description": "Get user profile from Cognito (AdminGetUser).\nReturns: username, email, role, firstName, lastName, status."
+    },
+
+    {
+      "_id": "fld_consumers",
+      "_type": "request_group",
+      "parentId": "wrk_munchgo",
+      "name": "Consumer Service (OIDC)",
+      "description": "Consumer management endpoints — Cognito OIDC protected.\nKong validates JWT and forwards X-User-Sub, X-User-Email, X-User-Roles headers.\nRate limit: 100 req/min"
+    },
+    {
+      "_id": "req_create_consumer",
+      "_type": "request",
+      "parentId": "fld_consumers",
+      "name": "Create Consumer",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/consumers",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phoneNumber\": \"+61412345678\",\n  \"address\": {\n    \"street1\": \"123 Collins Street\",\n    \"street2\": \"Level 5\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Create a new consumer profile.\nAfter sending, copy the consumerId from the response into the consumer_id environment variable.",
+      "afterResponseScript": "const res = pm.response.json();\nif (res.consumerId) {\n  pm.environment.set('consumer_id', res.consumerId);\n}"
+    },
+    {
+      "_id": "req_list_consumers",
+      "_type": "request",
+      "parentId": "fld_consumers",
+      "name": "List Consumers",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/consumers",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "List all consumers."
+    },
+    {
+      "_id": "req_get_consumer",
+      "_type": "request",
+      "parentId": "fld_consumers",
+      "name": "Get Consumer by ID",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Get a specific consumer by ID."
+    },
+    {
+      "_id": "req_update_consumer",
+      "_type": "request",
+      "parentId": "fld_consumers",
+      "name": "Update Consumer",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"phoneNumber\": \"+61498765432\",\n  \"address\": {\n    \"street1\": \"456 Bourke Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Update consumer profile details."
+    },
+    {
+      "_id": "req_update_consumer_address",
+      "_type": "request",
+      "parentId": "fld_consumers",
+      "name": "Update Consumer Address",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}/address",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"street1\": \"789 Flinders Lane\",\n  \"street2\": \"Suite 2\",\n  \"city\": \"Melbourne\",\n  \"state\": \"VIC\",\n  \"zip\": \"3000\",\n  \"country\": \"AU\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Update only the consumer's delivery address."
+    },
+    {
+      "_id": "req_validate_consumer",
+      "_type": "request",
+      "parentId": "fld_consumers",
+      "name": "Validate Consumer",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}/validate",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Validate that a consumer is eligible to place orders.\nUsed internally by the saga orchestrator during order creation."
+    },
+    {
+      "_id": "req_deactivate_consumer",
+      "_type": "request",
+      "parentId": "fld_consumers",
+      "name": "Deactivate Consumer",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}/deactivate",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Deactivate a consumer account (soft delete)."
+    },
+    {
+      "_id": "req_activate_consumer",
+      "_type": "request",
+      "parentId": "fld_consumers",
+      "name": "Activate Consumer",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/consumers/{{ _.consumer_id }}/activate",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Reactivate a previously deactivated consumer."
+    },
+
+    {
+      "_id": "fld_restaurants",
+      "_type": "request_group",
+      "parentId": "wrk_munchgo",
+      "name": "Restaurant Service (OIDC + Anonymous)",
+      "description": "Restaurant and menu management — OIDC protected with anonymous fallback.\nGET requests work without auth (guest menu browsing).\nPOST/PUT/DELETE require valid Cognito JWT.\nRate limit: 200 req/min"
+    },
+    {
+      "_id": "req_create_restaurant",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Create Restaurant",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/restaurants",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Melbourne Burger House\",\n  \"address\": {\n    \"street1\": \"100 Lygon Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3053\",\n    \"country\": \"AU\"\n  },\n  \"orderMinimum\": 15.00\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Create a new restaurant. Requires RESTAURANT_OWNER role.",
+      "afterResponseScript": "const res = pm.response.json();\nif (res.restaurantId) {\n  pm.environment.set('restaurant_id', res.restaurantId);\n}"
+    },
+    {
+      "_id": "req_list_restaurants",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "List Restaurants (Public)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/restaurants",
+      "body": {},
+      "headers": [],
+      "authentication": {},
+      "parameters": [
+        { "name": "city", "value": "Melbourne", "disabled": true }
+      ],
+      "description": "List all restaurants. No auth required (anonymous guest browsing).\nOptional query param: city"
+    },
+    {
+      "_id": "req_get_restaurant",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Get Restaurant with Menu (Public)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {},
+      "parameters": [],
+      "description": "Get restaurant details including full menu. No auth required."
+    },
+    {
+      "_id": "req_update_restaurant",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Update Restaurant",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Melbourne Burger House (Updated)\",\n  \"address\": {\n    \"street1\": \"100 Lygon Street\",\n    \"street2\": \"Ground Floor\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3053\",\n    \"country\": \"AU\"\n  },\n  \"orderMinimum\": 20.00\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Update restaurant details. Requires OIDC auth."
+    },
+    {
+      "_id": "req_add_menu_item",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Add Menu Item",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/menu-items",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"menuItemId\": \"burger-01\",\n  \"name\": \"Classic Cheeseburger\",\n  \"price\": 18.50,\n  \"description\": \"Angus beef patty with cheddar, lettuce, tomato, and house sauce\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Add a menu item to a restaurant."
+    },
+    {
+      "_id": "req_update_menu_item",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Update Menu Item",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/menu-items/{{ _.menu_item_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Classic Cheeseburger Deluxe\",\n  \"price\": 22.00,\n  \"description\": \"Double angus beef patty with aged cheddar, caramelised onion, and truffle aioli\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Update an existing menu item."
+    },
+    {
+      "_id": "req_delete_menu_item",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Delete Menu Item",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/menu-items/{{ _.menu_item_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Remove a menu item from a restaurant."
+    },
+    {
+      "_id": "req_validate_order",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Validate Order",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/validate-order",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ]\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Validate that an order's line items are valid against the restaurant's menu.\nUsed internally by the saga orchestrator during order creation."
+    },
+    {
+      "_id": "req_deactivate_restaurant",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Deactivate Restaurant",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/deactivate",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Deactivate a restaurant (stops accepting orders)."
+    },
+    {
+      "_id": "req_activate_restaurant",
+      "_type": "request",
+      "parentId": "fld_restaurants",
+      "name": "Activate Restaurant",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/restaurants/{{ _.restaurant_id }}/activate",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Reactivate a previously deactivated restaurant."
+    },
+
+    {
+      "_id": "fld_orders",
+      "_type": "request_group",
+      "parentId": "wrk_munchgo",
+      "name": "Order Service (OIDC) — CQRS",
+      "description": "Order management with CQRS pattern — separate query and command controllers.\nAll endpoints require Cognito OIDC JWT.\nRate limit: 100 req/min\n\nNote: For creating orders via the SPA, use the Saga Orchestrator (POST /api/v1/sagas/create-order)."
+    },
+    {
+      "_id": "fld_orders_query",
+      "_type": "request_group",
+      "parentId": "fld_orders",
+      "name": "Queries (Read)",
+      "description": "Order query endpoints — read-only, paginated responses."
+    },
+    {
+      "_id": "req_get_order",
+      "_type": "request",
+      "parentId": "fld_orders_query",
+      "name": "Get Order by ID",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Get a specific order by ID. Returns full order details including state, line items, and delivery info."
+    },
+    {
+      "_id": "req_orders_by_consumer",
+      "_type": "request",
+      "parentId": "fld_orders_query",
+      "name": "Get Orders by Consumer",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/orders",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [
+        { "name": "consumerId", "value": "{{ _.consumer_id }}" },
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" },
+        { "name": "state", "value": "APPROVED", "disabled": true }
+      ],
+      "description": "Get paginated orders for a specific consumer.\nOptional state filter: APPROVAL_PENDING, APPROVED, REJECTED, CANCEL_PENDING, CANCELLED, PREPARING, READY_FOR_PICKUP, PICKED_UP, DELIVERED"
+    },
+    {
+      "_id": "req_orders_by_restaurant",
+      "_type": "request",
+      "parentId": "fld_orders_query",
+      "name": "Get Orders by Restaurant",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/orders",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [
+        { "name": "restaurantId", "value": "{{ _.restaurant_id }}" },
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" }
+      ],
+      "description": "Get paginated orders for a specific restaurant."
+    },
+    {
+      "_id": "req_orders_by_courier",
+      "_type": "request",
+      "parentId": "fld_orders_query",
+      "name": "Get Orders by Courier",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/orders",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [
+        { "name": "courierId", "value": "{{ _.courier_id }}" },
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "20" }
+      ],
+      "description": "Get paginated orders assigned to a specific courier."
+    },
+    {
+      "_id": "req_orders_by_state",
+      "_type": "request",
+      "parentId": "fld_orders_query",
+      "name": "Get Orders by State",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/orders",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [
+        { "name": "state", "value": "APPROVAL_PENDING" },
+        { "name": "page", "value": "0" },
+        { "name": "size", "value": "100" }
+      ],
+      "description": "Get paginated orders by state.\nStates: APPROVAL_PENDING, APPROVED, REJECTED, CANCEL_PENDING, CANCELLED, PREPARING, READY_FOR_PICKUP, PICKED_UP, DELIVERED"
+    },
+    {
+      "_id": "req_order_history",
+      "_type": "request",
+      "parentId": "fld_orders_query",
+      "name": "Get Order History",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/history",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Get the full event history for an order (event-sourced audit trail)."
+    },
+    {
+      "_id": "fld_orders_cmd",
+      "_type": "request_group",
+      "parentId": "fld_orders",
+      "name": "Commands (Write)",
+      "description": "Order command endpoints — state transitions and mutations."
+    },
+    {
+      "_id": "req_create_order",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Create Order (Direct)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"consumerId\": \"{{ _.consumer_id }}\",\n  \"restaurantId\": \"{{ _.restaurant_id }}\",\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ],\n  \"deliveryAddress\": {\n    \"street1\": \"789 Flinders Lane\",\n    \"street2\": \"Suite 2\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  },\n  \"totalAmount\": 37.00\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Create an order directly (bypasses saga orchestration).\nFor production use, prefer POST /api/v1/sagas/create-order which coordinates validation across services.",
+      "afterResponseScript": "const res = pm.response.json();\nif (res.orderId) {\n  pm.environment.set('order_id', res.orderId);\n}"
+    },
+    {
+      "_id": "req_approve_order",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Approve Order",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/approve",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"courierId\": \"{{ _.courier_id }}\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Approve an order and assign a courier. Transitions: APPROVAL_PENDING → APPROVED"
+    },
+    {
+      "_id": "req_reject_order",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Reject Order",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/reject",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"reason\": \"Restaurant is closed\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Reject an order. Transitions: APPROVAL_PENDING → REJECTED"
+    },
+    {
+      "_id": "req_cancel_order",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Cancel Order",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/cancel",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"reason\": \"Customer changed their mind\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Cancel an order. Transitions: APPROVED → CANCEL_PENDING → CANCELLED"
+    },
+    {
+      "_id": "req_accept_order",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Accept Order (Ticket)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/accept",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"readyBy\": \"2026-02-16T19:30:00Z\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Restaurant accepts the order ticket with an estimated ready time.\nTransitions: APPROVED → ACCEPTED"
+    },
+    {
+      "_id": "req_preparing_order",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Mark Preparing",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/preparing",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Restaurant starts preparing the order. Transitions: ACCEPTED → PREPARING"
+    },
+    {
+      "_id": "req_ready_for_pickup",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Mark Ready for Pickup",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/ready-for-pickup",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Order is ready for courier pickup. Transitions: PREPARING → READY_FOR_PICKUP"
+    },
+    {
+      "_id": "req_picked_up",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Mark Picked Up",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/picked-up",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Courier picks up the order from the restaurant. Transitions: READY_FOR_PICKUP → PICKED_UP"
+    },
+    {
+      "_id": "req_delivered",
+      "_type": "request",
+      "parentId": "fld_orders_cmd",
+      "name": "Mark Delivered",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/orders/{{ _.order_id }}/delivered",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Courier delivers the order to the consumer. Transitions: PICKED_UP → DELIVERED (terminal state)"
+    },
+
+    {
+      "_id": "fld_couriers",
+      "_type": "request_group",
+      "parentId": "wrk_munchgo",
+      "name": "Courier Service (OIDC)",
+      "description": "Courier management endpoints — Cognito OIDC protected.\nRate limit: 100 req/min"
+    },
+    {
+      "_id": "req_create_courier",
+      "_type": "request",
+      "parentId": "fld_couriers",
+      "name": "Create Courier",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/couriers",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"firstName\": \"Mike\",\n  \"lastName\": \"Rider\",\n  \"address\": {\n    \"street1\": \"50 Spencer Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Create a new courier profile.",
+      "afterResponseScript": "const res = pm.response.json();\nif (res.courierId) {\n  pm.environment.set('courier_id', res.courierId);\n}"
+    },
+    {
+      "_id": "req_list_couriers",
+      "_type": "request",
+      "parentId": "fld_couriers",
+      "name": "List Couriers",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/couriers",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "List all couriers."
+    },
+    {
+      "_id": "req_get_courier",
+      "_type": "request",
+      "parentId": "fld_couriers",
+      "name": "Get Courier by ID",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Get a specific courier by ID."
+    },
+    {
+      "_id": "req_available_couriers",
+      "_type": "request",
+      "parentId": "fld_couriers",
+      "name": "Get Available Couriers",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/couriers/available",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [
+        { "name": "city", "value": "Melbourne", "disabled": true }
+      ],
+      "description": "Get couriers currently available for delivery.\nOptional query param: city"
+    },
+    {
+      "_id": "req_update_courier",
+      "_type": "request",
+      "parentId": "fld_couriers",
+      "name": "Update Courier",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"firstName\": \"Mike\",\n  \"lastName\": \"Rider\",\n  \"address\": {\n    \"street1\": \"200 Elizabeth Street\",\n    \"street2\": \"\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Update courier profile details."
+    },
+    {
+      "_id": "req_courier_availability",
+      "_type": "request",
+      "parentId": "fld_couriers",
+      "name": "Update Availability",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}/availability",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"available\": true\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Toggle courier availability for accepting deliveries."
+    },
+    {
+      "_id": "req_deactivate_courier",
+      "_type": "request",
+      "parentId": "fld_couriers",
+      "name": "Deactivate Courier",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}/deactivate",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Deactivate a courier account."
+    },
+    {
+      "_id": "req_activate_courier",
+      "_type": "request",
+      "parentId": "fld_couriers",
+      "name": "Activate Courier",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/couriers/{{ _.courier_id }}/activate",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Reactivate a previously deactivated courier."
+    },
+
+    {
+      "_id": "fld_sagas",
+      "_type": "request_group",
+      "parentId": "wrk_munchgo",
+      "name": "Saga Orchestrator (OIDC)",
+      "description": "Saga orchestrator for distributed transactions — Cognito OIDC protected.\nCoordinates order creation across consumer, restaurant, and courier services.\nRate limit: 100 req/min\n\nThis is the primary endpoint for creating orders from the SPA."
+    },
+    {
+      "_id": "req_saga_create_order",
+      "_type": "request",
+      "parentId": "fld_sagas",
+      "name": "Create Order (Saga)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/v1/sagas/create-order",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"consumerId\": \"{{ _.consumer_id }}\",\n  \"restaurantId\": \"{{ _.restaurant_id }}\",\n  \"lineItems\": [\n    {\n      \"menuItemId\": \"burger-01\",\n      \"quantity\": 2\n    }\n  ],\n  \"deliveryAddress\": {\n    \"street1\": \"789 Flinders Lane\",\n    \"street2\": \"Suite 2\",\n    \"city\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"zip\": \"3000\",\n    \"country\": \"AU\"\n  }\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Start a Create Order Saga — orchestrates:\n1. Validate consumer (consumer-service)\n2. Validate order against menu (restaurant-service)\n3. Create order (order-service)\n4. Assign courier (courier-service)\n5. Approve order (order-service)\n\nIf any step fails, compensating transactions roll back previous steps.",
+      "afterResponseScript": "const res = pm.response.json();\nif (res.sagaId) {\n  pm.environment.set('saga_id', res.sagaId);\n}\nif (res.orderId) {\n  pm.environment.set('order_id', res.orderId);\n}"
+    },
+    {
+      "_id": "req_saga_status",
+      "_type": "request",
+      "parentId": "fld_sagas",
+      "name": "Get Saga Status",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/sagas/{{ _.saga_id }}",
+      "body": {},
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.access_token }}"
+      },
+      "parameters": [],
+      "description": "Check the status of a running or completed saga.\nStates: STARTED, COMPLETED, COMPENSATING, FAILED"
+    }
+  ]
+}

@@ -890,6 +890,8 @@ graph LR
 │   └── 12-kiali.yaml               #   Wave 12: Kiali service mesh dashboard
 ├── deck/
 │   └── kong.yaml                   # Kong Gateway configuration (decK format)
+├── insomnia/
+│   └── munchgo-api.json            # Insomnia API collection (all MunchGo endpoints)
 ├── k8s/
 │   ├── namespace.yaml              # Namespace definitions (ambient mesh labeled)
 │   ├── apps/
@@ -1297,6 +1299,48 @@ Registers a test user in Cognito and returns access/ID/refresh tokens. Use the a
 ```bash
 curl -H "Authorization: Bearer $ACCESS_TOKEN" $APP_URL/api/v1/orders
 ```
+
+---
+
+## API Testing — Insomnia Collection
+
+An [Insomnia](https://insomnia.rest/) collection is included at [`insomnia/munchgo-api.json`](insomnia/munchgo-api.json) with **49 requests** covering all MunchGo API endpoints.
+
+### Import & Setup
+
+1. Open Insomnia → **Import** → select `insomnia/munchgo-api.json`
+2. Set the `base_url` environment variable to your CloudFront domain (e.g., `https://dxxxxxxxxx.cloudfront.net`)
+
+### Collection Structure
+
+| Folder | Endpoints | Auth | Description |
+|--------|-----------|------|-------------|
+| **Health** | 1 | None | `/healthz` platform health check |
+| **Auth Service** | 5 | None (public) | Register, login, refresh, logout, profile |
+| **Consumer Service** | 8 | OIDC Bearer | CRUD + validate, activate, deactivate |
+| **Restaurant Service** | 10 | OIDC + Anonymous | CRUD + menu items, validate-order |
+| **Order Service (Queries)** | 6 | OIDC Bearer | Get by ID, consumer, restaurant, courier, state, history |
+| **Order Service (Commands)** | 9 | OIDC Bearer | Create, approve, reject, cancel, accept, preparing, ready, picked-up, delivered |
+| **Courier Service** | 8 | OIDC Bearer | CRUD + availability, activate, deactivate |
+| **Saga Orchestrator** | 2 | OIDC Bearer | Create order saga, get saga status |
+
+### Recommended Test Flow
+
+Run requests in this order to test the full order lifecycle:
+
+1. `POST /api/v1/auth/register` — create a test user
+2. `POST /api/v1/auth/login` — get tokens (auto-populates `access_token`)
+3. `POST /api/v1/consumers` — create consumer (auto-populates `consumer_id`)
+4. `POST /api/v1/restaurants` — create restaurant (auto-populates `restaurant_id`)
+5. `POST /api/v1/restaurants/{id}/menu-items` — add menu items
+6. `POST /api/v1/couriers` — create courier (auto-populates `courier_id`)
+7. `POST /api/v1/couriers/{id}/availability` — set courier available
+8. `POST /api/v1/sagas/create-order` — start order saga (auto-populates `saga_id`, `order_id`)
+9. `GET /api/v1/sagas/{id}` — check saga completion
+10. `GET /api/v1/orders/{id}` — verify order created
+11. `POST /api/v1/orders/{id}/accept` → `preparing` → `ready-for-pickup` → `picked-up` → `delivered`
+
+> **Note:** Login, create-consumer, create-restaurant, create-courier, create-order, and create-saga requests include after-response scripts that automatically capture IDs into environment variables for chaining.
 
 ---
 
