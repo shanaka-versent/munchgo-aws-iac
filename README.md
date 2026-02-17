@@ -819,39 +819,46 @@ APPROVED → CANCELLED (customer only)
 
 ## GitOps Pipeline
 
-### CI/CD Flow
+### Container Registry & CI/CD Pipeline
+
+**GitHub Container Registry (GHCR)** is the single source of truth for all container images across both AWS and Azure deployments. GitHub Actions builds, tests, scans, and pushes images to GHCR. Each cloud's native registry syncs from GHCR automatically.
 
 ```mermaid
 graph LR
-    DEV[Developer] -->|git push| MICRO["munchgo-microservices<br/>GitHub"]
-    MICRO -->|GitHub Actions| BUILD["Build<br/>Java 21 + Jib"]
-    BUILD -->|Push Image| ECR["Amazon ECR<br/>:git-sha"]
-    BUILD -->|"kustomize edit<br/>set image"| GITOPS["munchgo-k8s-config<br/>GitHub"]
+    DEV[Developer] -->|git push| GH["munchgo-microservices<br/>GitHub"]
+    GH -->|GitHub Actions| BUILD["Build + Test<br/>Java 21 + Jib"]
+    BUILD -->|"Trivy scan +<br/>push image"| GHCR["GitHub Container<br/>Registry (GHCR)<br/>:git-sha"]
+    GHCR -->|"ECR Pull-Through<br/>Cache / Sync"| ECR["Amazon ECR<br/>:git-sha"]
+    ECR -->|Pull| EKS2["EKS Cluster"]
+    BUILD -->|"kustomize edit<br/>set image"| GITOPS["munchgo-k8s-config"]
     GITOPS -->|ArgoCD watches| ARGO["ArgoCD<br/>Auto-Sync"]
-    ARGO -->|kubectl apply| EKS["EKS Cluster<br/>munchgo namespace"]
+    ARGO -->|kubectl apply| EKS2
 
     style DEV fill:#fff,stroke:#333,color:#333
-    style MICRO fill:#24292E,color:#fff
+    style GH fill:#24292E,color:#fff
     style BUILD fill:#F68D2E,color:#fff
+    style GHCR fill:#24292E,color:#fff
     style ECR fill:#FF9900,color:#fff
     style GITOPS fill:#24292E,color:#fff
     style ARGO fill:#EF7B4D,color:#fff
-    style EKS fill:#232F3E,color:#fff
+    style EKS2 fill:#232F3E,color:#fff
 ```
 
 1. Developer pushes code to `munchgo-microservices`
-2. **GitHub Actions** builds the container image using Jib (no Docker daemon needed)
-3. Image is pushed to **Amazon ECR** with the git SHA as the tag
-4. CI updates the **kustomize overlay** in `munchgo-k8s-config` via `kustomize edit set image`
-5. **ArgoCD** detects the change and auto-syncs the new deployment to EKS
+2. **GitHub Actions** builds the container image, runs tests, and performs a Trivy vulnerability scan
+3. Image is pushed to **GHCR** (`ghcr.io/shanaka-versent/munchgo-*:git-sha`)
+4. **ECR** syncs the image from GHCR via pull-through cache (OIDC federation, zero secrets)
+5. CI updates the **kustomize overlay** in `munchgo-k8s-config` with the new image tag
+6. **ArgoCD** detects the change and auto-syncs the deployment to EKS
+7. EKS pulls images from **ECR** (IRSA-based authentication)
 
-### SPA CI/CD Flow
+### SPA Deployment
 
 ```mermaid
 graph LR
     DEV2[Developer] -->|git push| SPA_REPO["munchgo-spa<br/>GitHub"]
     SPA_REPO -->|GitHub Actions| BUILD2["Build<br/>npm ci + vite build"]
-    BUILD2 -->|aws s3 sync| S3_2["S3 SPA Bucket<br/>index.html + hashed assets"]
+    BUILD2 -->|"OIDC → AWS"| S3_2["S3 SPA Bucket<br/>index.html + hashed assets"]
     BUILD2 -->|create-invalidation| CF2["CloudFront<br/>Cache Invalidation"]
 
     style DEV2 fill:#fff,stroke:#333,color:#333
