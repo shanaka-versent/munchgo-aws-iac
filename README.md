@@ -827,8 +827,8 @@ APPROVED → CANCELLED (customer only)
 graph LR
     DEV[Developer] -->|git push| GH["munchgo-microservices<br/>GitHub"]
     GH -->|GitHub Actions| BUILD["Build + Test<br/>Java 21 + Jib"]
-    BUILD -->|"Trivy scan +<br/>push image"| GHCR["GitHub Container<br/>Registry (GHCR)<br/>:git-sha"]
-    GHCR -->|"ECR Pull-Through<br/>Cache / Sync"| ECR["Amazon ECR<br/>:git-sha"]
+    BUILD -->|"Jib push"| GHCR["GitHub Container<br/>Registry (GHCR)<br/>:git-sha"]
+    GHCR -->|"crane copy<br/>(OIDC → ECR)"| ECR["Amazon ECR<br/>:git-sha"]
     ECR -->|Pull| EKS2["EKS Cluster"]
     BUILD -->|"kustomize edit<br/>set image"| GITOPS["munchgo-k8s-config"]
     GITOPS -->|ArgoCD watches| ARGO["ArgoCD<br/>Auto-Sync"]
@@ -845,9 +845,9 @@ graph LR
 ```
 
 1. Developer pushes code to `munchgo-microservices`
-2. **GitHub Actions** builds the container image, runs tests, and performs a Trivy vulnerability scan
+2. **GitHub Actions** builds and tests the service, then pushes the container image to GHCR via Jib
 3. Image is pushed to **GHCR** (`ghcr.io/shanaka-versent/munchgo-*:git-sha`)
-4. **ECR** syncs the image from GHCR via pull-through cache (OIDC federation, zero secrets)
+4. `crane copy` replicates the image from GHCR to **ECR** (AWS OIDC federation, zero secrets)
 5. CI updates the **kustomize overlay** in `munchgo-k8s-config` with the new image tag
 6. **ArgoCD** detects the change and auto-syncs the deployment to EKS
 7. EKS pulls images from **ECR** (IRSA-based authentication)
