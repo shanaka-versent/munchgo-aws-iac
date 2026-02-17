@@ -43,6 +43,8 @@
 # Traffic Flow:
 # Client --> CloudFront (WAF) --> Kong Cloud GW (Kong's infra) --[Transit GW]--> Internal NLB --> Istio Gateway --> Pods
 
+data "aws_caller_identity" "current" {}
+
 locals {
   name_prefix  = "${var.project_name}-${var.environment}"
   cluster_name = "eks-${local.name_prefix}"
@@ -111,6 +113,8 @@ module "iam" {
   oidc_provider_url       = module.eks.oidc_provider_url
   enable_external_secrets = var.enable_external_secrets
   enable_cognito          = var.enable_cognito
+  aws_account_id          = data.aws_caller_identity.current.account_id
+  ecr_region              = var.region
   tags                    = var.tags
 }
 

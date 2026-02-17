@@ -47,9 +47,21 @@ variable "enable_spa_deploy_role" {
 }
 
 variable "spa_deploy_github_repos" {
-  description = "GitHub repos allowed to assume the SPA deploy role (org/repo format)"
+  description = "GitHub repos allowed to assume the CI/CD deploy role (org/repo format)"
   type        = list(string)
-  default     = ["shanaka-versent/munchgo-spa"]
+  default     = ["shanaka-versent/munchgo-spa", "shanaka-versent/munchgo-microservices"]
+}
+
+variable "aws_account_id" {
+  description = "AWS account ID for ECR policy resource ARNs"
+  type        = string
+  default     = ""
+}
+
+variable "ecr_region" {
+  description = "AWS region for ECR repositories"
+  type        = string
+  default     = "ap-southeast-2"
 }
 
 variable "tags" {

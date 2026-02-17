@@ -852,6 +852,25 @@ graph LR
 6. **ArgoCD** detects the change and auto-syncs the deployment to EKS
 7. EKS pulls images from **ECR** (IRSA-based authentication)
 
+### GitHub Actions Secrets & Variables
+
+The `munchgo-microservices` repo requires these GitHub secrets/variables for the CI/CD pipeline to function:
+
+| Secret/Variable | Type | Value | Used By |
+|-----------------|------|-------|---------|
+| `AWS_ACCOUNT_ID` | Secret | Your AWS account ID | ECR registry URL |
+| `AWS_REGION` | Secret | `ap-southeast-2` | ECR region |
+| `AWS_ROLE_ARN` | Secret | `arn:aws:iam::<account>:role/role-spa-deploy-kong-gw-poc` | OIDC federation |
+| `GITOPS_TOKEN` | Secret | GitHub PAT with `repo` scope on `munchgo-k8s-config` | GitOps image tag updates |
+| `AZURE_CLIENT_ID` | Secret | Azure AD app client ID (optional) | ACR sync via OIDC |
+| `AZURE_TENANT_ID` | Secret | Azure AD tenant ID (optional) | ACR sync via OIDC |
+| `AZURE_SUBSCRIPTION_ID` | Secret | Azure subscription ID (optional) | ACR sync via OIDC |
+| `AZURE_ACR_NAME` | Variable | ACR name, e.g. `munchgoacr` (optional) | Conditional ACR sync |
+
+**AWS OIDC Identity:** The IAM role `role-spa-deploy-kong-gw-poc` is created by Terraform (`terraform/modules/iam/github_oidc.tf`). It trusts both `munchgo-spa` and `munchgo-microservices` repos via GitHub Actions OIDC federation. The role has two policies attached:
+- **SPA Deploy** — S3 sync + CloudFront invalidation
+- **Microservices ECR Push** — `ecr:PutImage`, `ecr:GetAuthorizationToken`, etc. on `munchgo-*` repositories
+
 ### SPA Deployment
 
 ```mermaid

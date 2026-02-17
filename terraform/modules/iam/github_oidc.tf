@@ -1,4 +1,4 @@
-# GitHub Actions OIDC Provider + SPA Deploy Role
+# GitHub Actions OIDC Provider + CI/CD Roles
 # @author Shanaka Jayasundera - shanakaj@gmail.com
 #
 # Enables GitHub Actions to assume IAM roles via OIDC federation.
@@ -8,6 +8,7 @@
 # The SPA deploy role grants:
 # - S3: PutObject, DeleteObject, ListBucket on the SPA bucket
 # - CloudFront: CreateInvalidation on the distribution
+# - ECR: Push images to munchgo-* repositories (for microservices CI/CD)
 #
 # Trust policy restricts access to specific GitHub repos.
 
@@ -112,5 +113,53 @@ resource "aws_iam_policy" "spa_deploy" {
 resource "aws_iam_role_policy_attachment" "spa_deploy" {
   count      = var.enable_spa_deploy_role ? 1 : 0
   policy_arn = aws_iam_policy.spa_deploy[0].arn
+  role       = aws_iam_role.spa_deploy[0].name
+}
+
+# ==============================================================================
+# MICROSERVICES ECR PUSH POLICY
+# ==============================================================================
+# Grants ECR push access for munchgo microservices CI/CD pipeline.
+# Images are built by Jib → pushed to GHCR → synced to ECR via crane copy.
+# Attached to the same OIDC role so microservices workflows can push to ECR.
+
+resource "aws_iam_policy" "microservices_ecr_push" {
+  count       = var.enable_spa_deploy_role ? 1 : 0
+  name        = "policy-microservices-ecr-push"
+  description = "ECR push access for munchgo microservices CI/CD"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ECRAuth"
+        Effect   = "Allow"
+        Action   = "ecr:GetAuthorizationToken"
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPush"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:DescribeRepositories"
+        ]
+        Resource = "arn:aws:ecr:${var.ecr_region}:${var.aws_account_id}:repository/munchgo-*"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "microservices_ecr_push" {
+  count      = var.enable_spa_deploy_role ? 1 : 0
+  policy_arn = aws_iam_policy.microservices_ecr_push[0].arn
   role       = aws_iam_role.spa_deploy[0].name
 }
