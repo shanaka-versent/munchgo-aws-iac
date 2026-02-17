@@ -268,7 +268,7 @@ graph TB
         KAFKA_EW["Amazon MSK<br/>Kafka"]
     end
 
-    SAGA_EW -->|"HTTP GET /api/v1/consumers/{id}<br/>ztunnel mTLS → Waypoint L7 → ztunnel"| CONSUMER_EW
+    SAGA_EW -->|"HTTP POST /api/v1/consumers/{id}/validate<br/>ztunnel mTLS → Waypoint L7 → ztunnel"| CONSUMER_EW
     SAGA_EW -->|"HTTP GET /api/v1/restaurants/{id}<br/>ztunnel mTLS → Waypoint L7 → ztunnel"| RESTAURANT_EW
     SAGA_EW -->|"HTTP POST /api/v1/orders<br/>ztunnel mTLS → Waypoint L7 → ztunnel"| ORDER_EW
 
@@ -296,7 +296,7 @@ graph TB
 
 | Source | Target | Protocol | Path / Topic | Istio mTLS? |
 |--------|--------|----------|-------------|-------------|
-| **Saga Orchestrator** | Consumer Service | HTTP GET | `/api/v1/consumers/{id}` | Yes (ztunnel + waypoint) |
+| **Saga Orchestrator** | Consumer Service | HTTP POST | `/api/v1/consumers/{id}/validate` | Yes (ztunnel + waypoint) |
 | **Saga Orchestrator** | Restaurant Service | HTTP GET | `/api/v1/restaurants/{id}` | Yes (ztunnel + waypoint) |
 | **Saga Orchestrator** | Order Service | HTTP POST/PUT | `/api/v1/orders`, `/api/v1/orders/{id}/approve` | Yes (ztunnel + waypoint) |
 | **Saga Orchestrator** | Courier Service | Kafka | `saga-commands` topic | No (external MSK) |
@@ -322,11 +322,12 @@ Kafka traffic bypasses Istio entirely because MSK runs outside the cluster in de
 
 #### Istio Authorization Policies (Least Privilege)
 
-Four policies enforce the communication matrix:
+Five policies enforce the communication matrix:
 
 | Policy | What It Does |
 |--------|-------------|
-| `allow-gateway-ingress` | Istio Gateway (istio-ingress namespace) can reach all 5 backend services |
+| `allow-gateway-ingress-l4` | L4 (ztunnel) — Istio Gateway (istio-ingress namespace) can reach all backend services |
+| `allow-intra-munchgo-l4` | L4 (ztunnel) — allows east-west traffic between services within the munchgo namespace (required for saga HTTP calls) |
 | `allow-saga-orchestrator` | Saga Orchestrator service account can call Consumer, Restaurant, Order, Courier |
 | `restrict-saga-orchestrator` | Saga Orchestrator reachable from within munchgo namespace + Istio Gateway (north-south ingress for `/api/v1/sagas`) |
 | `allow-health-checks` | Any source can reach `/actuator/health/*` endpoints (for K8s probes) |
@@ -450,7 +451,7 @@ graph TB
     KONG -->|/api/v1/couriers — OIDC| COURIER3
     KONG -->|/api/v1/sagas — OIDC| SAGA3
 
-    SAGA3 -->|"HTTP GET (Istio mTLS)"| CONSUMER3
+    SAGA3 -->|"HTTP POST (Istio mTLS)"| CONSUMER3
     SAGA3 -->|"HTTP GET (Istio mTLS)"| RESTAURANT3
     SAGA3 -->|"HTTP POST/PUT (Istio mTLS)"| ORDER3
 
@@ -706,7 +707,7 @@ sequenceDiagram
 
     Note over S,CS: East-West HTTP (Istio mTLS + Waypoint AuthZ)
     rect rgb(240, 248, 255)
-        S->>CS: Step 1: GET /api/v1/consumers/{id}
+        S->>CS: Step 1: POST /api/v1/consumers/{id}/validate
         CS-->>S: 200 OK (consumer valid)
     end
 
@@ -722,7 +723,7 @@ sequenceDiagram
 
     Note over S,CR: Async via Kafka (external MSK)
     rect rgb(255, 248, 240)
-        S->>K: Step 4: saga-commands (ASSIGN_COURIER)
+        S->>K: Step 4: saga-commands (AssignCourier)
         K->>CR: Assign available courier
         CR->>K: saga-replies (CourierAssigned)
         K->>S: CourierAssigned (courierId)
