@@ -71,6 +71,22 @@ spec:
             namespaces: ["istio-ingress"]
 
 ---
+# L4 policy (enforced by ztunnel) — allows intra-namespace traffic between munchgo services
+# Required for saga orchestrator REST calls to consumer/restaurant/order/courier services.
+# Kafka communication goes through MSK (external), so only HTTP east-west needs this.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-intra-munchgo-l4
+  namespace: munchgo
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["munchgo"]
+
+---
 # Allow Saga Orchestrator to call all services (saga coordination via REST)
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
