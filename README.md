@@ -110,53 +110,6 @@ MunchGo uses **Istio Ambient Mesh** — zero sidecar containers. L4 mTLS is hand
 
 ![Istio Ambient Service Mesh](docs/images/Istio%20Ambient%20Service%20Mesh.png)
 
-```mermaid
-graph TB
-    subgraph mesh ["Istio Ambient Mesh (munchgo namespace)"]
-        subgraph l4 ["L4: ztunnel (automatic mTLS)"]
-            AUTH2[auth-service]
-            CONSUMER2[consumer-service]
-            RESTAURANT2[restaurant-service]
-            ORDER2[order-service]
-            COURIER2[courier-service]
-            SAGA2[saga-orchestrator]
-        end
-
-        WP2["Waypoint Proxy<br/>L7 Authorization + Telemetry<br/>gatewayClassName: istio-waypoint"]
-    end
-
-    subgraph control ["Istio Control Plane (istio-system)"]
-        ISTIOD["istiod<br/>Config Distribution"]
-        CNI["istio-cni<br/>Network Rules"]
-        ZT["ztunnel<br/>L4 mTLS DaemonSet"]
-    end
-
-    ISTIOD -->|xDS Config| WP2
-    ISTIOD -->|xDS Config| ZT
-    ZT -->|Transparent mTLS| AUTH2
-    ZT -->|Transparent mTLS| CONSUMER2
-    ZT -->|Transparent mTLS| RESTAURANT2
-    ZT -->|Transparent mTLS| ORDER2
-    ZT -->|Transparent mTLS| COURIER2
-    ZT -->|Transparent mTLS| SAGA2
-    WP2 -->|AuthZ Policy| ORDER2
-    WP2 -->|AuthZ Policy| SAGA2
-
-    style WP2 fill:#466BB0,color:#fff
-    style ISTIOD fill:#466BB0,color:#fff
-    style ZT fill:#466BB0,color:#fff
-    style CNI fill:#466BB0,color:#fff
-    style AUTH2 fill:#2E8B57,color:#fff
-    style CONSUMER2 fill:#2E8B57,color:#fff
-    style RESTAURANT2 fill:#2E8B57,color:#fff
-    style ORDER2 fill:#2E8B57,color:#fff
-    style COURIER2 fill:#2E8B57,color:#fff
-    style SAGA2 fill:#8B0000,color:#fff
-    style mesh fill:#F0F0F0,stroke:#BBB,color:#333
-    style control fill:#F5F5F5,stroke:#CCC,color:#333
-    style l4 fill:#FAFAFA,stroke:#DDD,color:#333
-```
-
 | Component | Role | Scope |
 |-----------|------|-------|
 | **ztunnel** | L4 mTLS proxy (DaemonSet) | Automatic — encrypts all pod-to-pod traffic |
@@ -172,42 +125,6 @@ MunchGo uses a **hybrid communication model**: synchronous HTTP calls for saga o
 **Only the Saga Orchestrator makes direct HTTP calls to other services.** All other services communicate exclusively via Kafka. Istio authorization policies enforce this — even though all services have ClusterIP endpoints, only authorized sources can reach them.
 
 ![MunchGo East-West Traffic](docs/images/MunchGo%20-%20East-West%20Traffic.png)
-
-```mermaid
-graph TB
-    subgraph mesh_ew ["munchgo namespace — Istio Ambient mTLS"]
-        SAGA_EW[saga-orchestrator]
-        CONSUMER_EW[consumer-service]
-        RESTAURANT_EW[restaurant-service]
-        ORDER_EW[order-service]
-        COURIER_EW[courier-service]
-        AUTH_EW[auth-service]
-    end
-
-    subgraph external_ew ["External (outside mesh)"]
-        KAFKA_EW["Amazon MSK<br/>Kafka"]
-    end
-
-    SAGA_EW -->|"HTTP POST /api/v1/consumers/{id}/validate<br/>ztunnel mTLS → Waypoint L7 → ztunnel"| CONSUMER_EW
-    SAGA_EW -->|"HTTP GET /api/v1/restaurants/{id}<br/>ztunnel mTLS → Waypoint L7 → ztunnel"| RESTAURANT_EW
-    SAGA_EW -->|"HTTP POST /api/v1/orders<br/>ztunnel mTLS → Waypoint L7 → ztunnel"| ORDER_EW
-
-    SAGA_EW -.->|"Kafka: saga-commands<br/>(assign courier)"| KAFKA_EW
-    KAFKA_EW -.->|"Kafka: saga-replies<br/>(courier assigned)"| SAGA_EW
-    AUTH_EW -.->|"Kafka: user-events<br/>(user registered)"| KAFKA_EW
-    KAFKA_EW -.->|"Kafka: user-events"| CONSUMER_EW
-    KAFKA_EW -.->|"Kafka: user-events"| COURIER_EW
-
-    style SAGA_EW fill:#8B0000,color:#fff
-    style AUTH_EW fill:#2E8B57,color:#fff
-    style CONSUMER_EW fill:#2E8B57,color:#fff
-    style RESTAURANT_EW fill:#2E8B57,color:#fff
-    style ORDER_EW fill:#2E8B57,color:#fff
-    style COURIER_EW fill:#2E8B57,color:#fff
-    style KAFKA_EW fill:#FF9900,color:#fff
-    style mesh_ew fill:#F0F0F0,stroke:#BBB,color:#333
-    style external_ew fill:#F5F5F5,stroke:#CCC,color:#333
-```
 
 **Solid arrows** = synchronous HTTP (encrypted by Istio ztunnel mTLS, authorized by waypoint L7 policy).
 **Dashed arrows** = asynchronous Kafka (external to mesh, via Amazon MSK).
