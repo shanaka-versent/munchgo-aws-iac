@@ -37,82 +37,83 @@ The underlying platform pattern — Kong Cloud Gateway, EKS, Istio Gateway API, 
 Two AWS accounts are involved. Traffic never touches the public internet between Kong and EKS. MunchGo microservices communicate east-west via Istio Ambient mTLS and north-south through Kong Cloud Gateway.
 
 ```mermaid
-graph TB
-    Client([Client / SPA])
-    CF["CloudFront + WAF<br/>Edge Security + Origin mTLS"]
-
-    subgraph kong_acct ["Kong's AWS Account (192.168.0.0/16)"]
-        Kong["Kong Cloud Gateway<br/>Fully Managed by Konnect<br/>OIDC Cognito · Rate Limit · CORS · Analytics"]
-    end
-
-    TGW{{"AWS Transit Gateway<br/>Private AWS Backbone"}}
-
-    subgraph your_acct ["Your AWS Account (10.0.0.0/16)"]
-        subgraph eks_cluster [EKS Cluster]
-            subgraph ns_istio_ing [istio-ingress]
-                NLB[Internal NLB]
-                IGW["Istio Gateway<br/>K8s Gateway API"]
-            end
-            subgraph ns_munchgo [munchgo namespace — Istio Ambient + Waypoint]
-                AUTH["auth-service<br/>Cognito facade"]
-                CONSUMER[consumer-service]
-                RESTAURANT[restaurant-service]
-                ORDER["order-service<br/>CQRS + Events"]
-                COURIER[courier-service]
-                SAGA["saga-orchestrator<br/>Saga Pattern"]
-            end
-            subgraph ns_gw_health [gateway-health]
-                Health[health-responder]
-            end
-        end
-        subgraph data_services [Managed AWS Data Services]
-            COGNITO["Amazon Cognito<br/>User Pool + OIDC"]
-            MSK["Amazon MSK<br/>Kafka 3.6.0"]
-            RDS[("Amazon RDS<br/>PostgreSQL 16<br/>6 Databases")]
-            ECR["Amazon ECR<br/>6 Repositories"]
-            S3["S3 + CloudFront<br/>React SPA"]
-        end
-    end
-
-    Client -->|HTTPS| CF
-    CF -->|HTTPS + Origin mTLS| Kong
-    Kong -->|HTTPS via TGW| TGW
+---
+config:
+  layout: elk
+---
+flowchart TB
+ subgraph kong_acct["Kong's AWS Account (192.168.0.0/16)"]
+        Kong["Kong Cloud Gateway<br>Fully Managed by Konnect<br>OIDC Cognito · Rate Limit · CORS · Analytics"]
+  end
+ subgraph ns_istio_ing["istio-ingress"]
+        NLB["Internal NLB"]
+        IGW["Istio Gateway<br>K8s Gateway API"]
+  end
+ subgraph ns_munchgo["munchgo namespace — Istio Ambient + Waypoint"]
+        AUTH["auth-service<br>Cognito facade"]
+        CONSUMER["consumer-service"]
+        RESTAURANT["restaurant-service"]
+        ORDER["order-service<br>CQRS + Events"]
+        COURIER["courier-service"]
+        SAGA["saga-orchestrator<br>Saga Pattern"]
+  end
+ subgraph ns_gw_health["gateway-health"]
+        Health["health-responder"]
+  end
+ subgraph eks_cluster["EKS Cluster"]
+        ns_istio_ing
+        ns_munchgo
+        ns_gw_health
+  end
+ subgraph data_services["Managed AWS Data Services"]
+        COGNITO["Amazon Cognito<br>User Pool + OIDC"]
+        MSK["Amazon MSK<br>Kafka 3.6.0"]
+        RDS[("Amazon RDS<br>PostgreSQL 16<br>6 Databases")]
+        ECR["Amazon ECR<br>6 Repositories"]
+        S3["S3 + CloudFront<br>React SPA"]
+  end
+ subgraph your_acct["Your AWS Account (10.0.0.0/16)"]
+        eks_cluster
+        data_services
+  end
+    Client(["Client / SPA"]) -- HTTPS --> CF["CloudFront + WAF<br>Edge Security + Origin mTLS"]
+    CF -- HTTPS + Origin mTLS --> Kong
+    Kong -- HTTPS via TGW --> TGW{{"AWS Transit Gateway<br>Private AWS Backbone"}}
     TGW --> NLB
     NLB --> IGW
-    IGW -->|HTTPRoute /api/v1/auth| AUTH
-    IGW -->|HTTPRoute /api/v1/consumers| CONSUMER
-    IGW -->|HTTPRoute /api/v1/restaurants| RESTAURANT
-    IGW -->|HTTPRoute /api/v1/orders| ORDER
-    IGW -->|HTTPRoute /api/v1/couriers| COURIER
-    IGW -->|HTTPRoute /api/v1/sagas| SAGA
+    IGW -- HTTPRoute /api/v1/auth --> AUTH
+    IGW -- HTTPRoute /api/v1/consumers --> CONSUMER
+    IGW -- HTTPRoute /api/v1/restaurants --> RESTAURANT
+    IGW -- HTTPRoute /api/v1/orders --> ORDER
+    IGW -- HTTPRoute /api/v1/couriers --> COURIER
+    IGW -- HTTPRoute /api/v1/sagas --> SAGA
+    AUTH -. Cognito Admin API .-> COGNITO
+    AUTH -. Kafka Events .-> MSK
+    ORDER -. Kafka Events .-> MSK
+    SAGA -. Kafka Orchestration .-> MSK
+    AUTH -. JDBC .-> RDS
+    CONSUMER -. JDBC .-> RDS
+    RESTAURANT -. JDBC .-> RDS
+    ORDER -. JDBC .-> RDS
+    COURIER -. JDBC .-> RDS
+    SAGA -. JDBC .-> RDS
 
-    AUTH -.->|Cognito Admin API| COGNITO
-    AUTH -.->|Kafka Events| MSK
-    ORDER -.->|Kafka Events| MSK
-    SAGA -.->|Kafka Orchestration| MSK
-    AUTH -.->|JDBC| RDS
-    CONSUMER -.->|JDBC| RDS
-    RESTAURANT -.->|JDBC| RDS
-    ORDER -.->|JDBC| RDS
-    COURIER -.->|JDBC| RDS
-    SAGA -.->|JDBC| RDS
-
-    style Kong fill:#003459,color:#fff
-    style IGW fill:#466BB0,color:#fff
     style CF fill:#F68D2E,color:#fff
+    style Kong fill:#003459,color:#fff
     style TGW fill:#232F3E,color:#fff
     style NLB fill:#232F3E,color:#fff
-    style MSK fill:#FF9900,color:#fff
-    style RDS fill:#3B48CC,color:#fff
-    style ECR fill:#FF9900,color:#fff
-    style COGNITO fill:#DD344C,color:#fff
-    style S3 fill:#3F8624,color:#fff
+    style IGW fill:#466BB0,color:#fff
     style AUTH fill:#2E8B57,color:#fff
     style CONSUMER fill:#2E8B57,color:#fff
     style RESTAURANT fill:#2E8B57,color:#fff
     style ORDER fill:#2E8B57,color:#fff
     style COURIER fill:#2E8B57,color:#fff
     style SAGA fill:#8B0000,color:#fff
+    style COGNITO fill:#DD344C,color:#fff
+    style MSK fill:#FF9900,color:#fff
+    style RDS fill:#3B48CC,color:#fff
+    style ECR fill:#FF9900,color:#fff
+    style S3 fill:#3F8624,color:#fff
     style kong_acct fill:#E8E8E8,stroke:#999,color:#333
     style your_acct fill:#E8E8E8,stroke:#999,color:#333
     style eks_cluster fill:#F0F0F0,stroke:#BBB,color:#333
