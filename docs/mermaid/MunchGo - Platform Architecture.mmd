@@ -1,0 +1,73 @@
+---
+config:
+  layout: fixed
+  theme: mc
+---
+flowchart TB
+ subgraph kong_acct["Kong's AWS Account"]
+        Kong["Kong Cloud Gateway<br>Fully Managed by Konnect<br>OIDC Cognito · Rate Limit · CORS · Analytics"]
+  end
+ subgraph ns_istio_ing["K8s Gateway API"]
+        NLB["Internal NLB"]
+        IGW["Istio Gateway"]
+  end
+ subgraph ns_munchgo["munchgo namespace"]
+        AUTH["auth-service<br>Cognito facade&nbsp;"]
+        CONSUMER["consumer-service&nbsp;<br>&nbsp;"]
+        RESTAURANT["restaurant-service&nbsp;<br>&nbsp;"]
+        ORDER["order-service<br>CQRS + Events"]
+        COURIER["courier-service&nbsp;<br>&nbsp;"]
+        SAGA["saga-orchestrator<br>Saga Pattern"]
+  end
+ subgraph eks_cluster["EKS Cluster"]
+        ns_istio_ing
+        ns_munchgo
+  end
+ subgraph data_services["Managed AWS Data Services"]
+        COGNITO["Amazon Cognito<br>User Pool + OIDC"]
+        MSK["Amazon MSK<br>Kafka 3.6.0"]
+        RDS[("Amazon RDS<br>PostgreSQL 16<br>6 Databases")]
+        ECR["Amazon ECR<br>&nbsp;"]
+        S3["S3 + CloudFront<br>React SPA"]
+  end
+ subgraph customer_acct["Customer AWS Account"]
+        TGW{{"AWS Transit Gateway<br>Private AWS Backbone"}}
+        CF["CloudFront + WAF<br>Edge Security + Origin mTLS"]
+        eks_cluster
+        data_services
+  end
+    Client(["Client / SPA"]) -- <br> --> CF
+    Kong -- HTTPS via TGW --> TGW
+    TGW --> NLB
+    NLB --> IGW
+    IGW -- <br> --> AUTH & RESTAURANT & SAGA & ORDER
+    IGW --> CONSUMER & COURIER
+    AUTH -.-> COGNITO & MSK & RDS
+    ORDER -.-> MSK & RDS
+    SAGA -.-> MSK & RDS
+    CONSUMER -.-> RDS
+    RESTAURANT -.-> RDS
+    COURIER -.-> RDS
+    CF --> S3 & Kong
+
+     AUTH:::micro
+     CONSUMER:::micro
+     RESTAURANT:::micro
+     ORDER:::micro
+     COURIER:::micro
+     SAGA:::micro
+    classDef micro fill:#2E8B57,color:#fff,stroke:#2E8B57,font-size:12px
+    style Kong fill:#003459,color:#fff
+    style NLB fill:#232F3E,color:#fff
+    style IGW fill:#466BB0,color:#fff
+    style COGNITO fill:#DD344C,color:#fff
+    style MSK fill:#FF9900,color:#fff
+    style RDS fill:#424242,color:#fff
+    style ECR fill:#FF9900,color:#fff
+    style S3 fill:#3F8624,color:#fff
+    style TGW fill:#424242,color:#fff
+    style CF fill:#F68D2E,color:#fff
+    style eks_cluster fill:#F0F0F0,stroke:#BBB,color:#333
+    style data_services fill:#F0F0F0,stroke:#BBB,color:#333
+    style kong_acct fill:#E8E8E8,stroke:#999,color:#333
+    style customer_acct fill:#E8E8E8,stroke:#999,color:#333

@@ -1,0 +1,90 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+ subgraph clients["Clients"]
+    direction LR
+        WEB["Web Browser"]
+        MOBILE["Mobile App"]
+  end
+ subgraph CENTER[" "]
+    direction TB
+        CDN["CloudFront CDN<br>WAF · Cache · SSL Termination"]
+        SPA["Single Page Application (SPA)"]
+        GATEWAY["API Gateway"]
+  end
+ subgraph microservices["Microservices Boundary — Java 21 — Spring Boot 3.2"]
+    direction LR
+        AUTH["auth-service"]
+        CONSUMER["consumer-service"]
+        RESTAURANT["restaurant-service"]
+        COURIER["courier-service"]
+        ORDER["order-service"]
+        SAGA["saga-orchestrator"]
+  end
+ subgraph data_layer["Data Layer — Amazon RDS PostgreSQL 16 — Database per Service"]
+    direction LR
+        DB_AUTH[("auth_db")]
+        DB_CON[("consumers_db")]
+        DB_RES[("restaurants_db")]
+        DB_COU[("couriers_db")]
+        DB_ORD[("orders_db")]
+        DB_SAG[("sagas_db")]
+  end
+ subgraph system_boundary["System Boundary"]
+    direction TB
+        CENTER
+        microservices
+        data_layer
+        KAFKA["Pub/Sub: Apache Kafka"]
+        COGNITO["idp: Amazon Cognito"]
+  end
+    WEB -- HTTPS --> CDN
+    MOBILE -- HTTPS --> CDN
+    CDN -- Static Assets --> SPA
+    CDN -- /api/* --> GATEWAY
+    GATEWAY -- /api/v1/consumers --> CONSUMER
+    GATEWAY -- /api/v1/restaurants --> RESTAURANT
+    GATEWAY -- /api/v1/couriers --> COURIER
+    GATEWAY -- /api/v1/orders --> ORDER
+    GATEWAY -- /api/v1/sagas --> SAGA
+    GATEWAY -- /api/v1/auth --> AUTH
+    SAGA -. Orchestrate .-> CONSUMER & RESTAURANT & COURIER & ORDER
+    AUTH -. Domain Events .-> KAFKA
+    CONSUMER -. Domain Events .-> KAFKA
+    RESTAURANT -. Domain Events .-> KAFKA
+    COURIER -. Domain Events .-> KAFKA
+    ORDER -. Domain Events .-> KAFKA
+    AUTH -. OIDC .-> COGNITO
+    AUTH -- JDBC --> DB_AUTH
+    CONSUMER -- JDBC --> DB_CON
+    RESTAURANT -- JDBC --> DB_RES
+    COURIER -- JDBC --> DB_COU
+    ORDER -- JDBC --> DB_ORD
+    SAGA -- JDBC --> DB_SAG
+
+    style WEB fill:#6366f1,color:#fff
+    style MOBILE fill:#6366f1,color:#fff
+    style CDN fill:#F68D2E,color:#fff
+    style SPA fill:#757575,color:#fff
+    style GATEWAY fill:#003459,color:#fff
+    style AUTH fill:#2E8B57,color:#fff
+    style CONSUMER fill:#2E8B57,color:#fff
+    style RESTAURANT fill:#2E8B57,color:#fff
+    style COURIER fill:#2E8B57,color:#fff
+    style ORDER fill:#2E8B57,color:#fff
+    style SAGA fill:#8B0000,color:#fff
+    style DB_AUTH fill:#424242,color:#fff
+    style DB_CON fill:#424242,color:#fff
+    style DB_RES fill:#424242,color:#fff
+    style DB_COU fill:#424242,color:#fff
+    style DB_ORD fill:#424242,color:#fff
+    style DB_SAG fill:#424242,color:#fff
+    style CENTER fill:transparent,stroke-width:0px
+    style microservices fill:#F2F2F2,stroke:#999,color:#333
+    style data_layer fill:#F5F0FF,stroke:#8B5CF6,color:#333
+    style KAFKA fill:#FF9900,color:#fff
+    style COGNITO fill:#DD344C,color:#fff
+    style clients fill:#EEF2FF,stroke:#818cf8,color:#333
+    style system_boundary fill:transparent,stroke:#000000,stroke-width:1px,color:#333

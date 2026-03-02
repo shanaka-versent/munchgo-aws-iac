@@ -1,0 +1,83 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+ subgraph PRESENTATION["Presentation Layer"]
+    direction TB
+        AUTH_C["AuthController"]
+        BROWSE_C["BrowseController"]
+        CUST_C["CustomerMvcController"]
+        REST_C["RestaurantOwnerMvcController"]
+        COUR_C["CourierMvcController"]
+        ADMIN_C["AdminMvcController"]
+  end
+ subgraph VIEWS["View Layer - Thymeleaf SSR - 21 Templates"]
+    direction TB
+        V1["login / register"]
+        V2["browse restaurants"]
+        V3["customer dashboard"]
+        V4["restaurant dashboard"]
+        V5["courier dashboard"]
+        V6["admin dashboard"]
+  end
+ subgraph SECURITY["Security - Spring Security 5.3"]
+    direction TB
+        FORM["Form-Based Login"]
+        SESS["HTTP Sessions - JSESSIONID"]
+        RBAC["Role-Based Access Control"]
+  end
+ subgraph SERVICES["Service Layer"]
+    direction TB
+        ORD_S["OrderService"]
+        CON_S["ConsumerService"]
+        RES_S["RestaurantService"]
+        COU_S["CourierService"]
+  end
+ subgraph DOMAIN["Domain Layer"]
+    direction LR
+        E_COU["Courier"]
+        E_CON["Consumer"]
+        E_USR["User + Role"]
+        E_ORD["Order + OrderLineItem"]
+        E_RES["Restaurant + MenuItem"]
+  end
+    BROWSER["Web Browser"] --> PRESENTATION
+    PRESENTATION --> VIEWS & SERVICES & SECURITY
+    SERVICES --> DOMAIN
+    DOMAIN --> DB[("Oracle Database - Single Shared Schema - 9 Tables")]
+
+     AUTH_C:::presentation
+     BROWSE_C:::presentation
+     CUST_C:::presentation
+     REST_C:::presentation
+     COUR_C:::presentation
+     ADMIN_C:::presentation
+     V1:::views
+     V2:::views
+     V3:::views
+     V4:::views
+     V5:::views
+     V6:::views
+     FORM:::security
+     SESS:::security
+     RBAC:::security
+     ORD_S:::services
+     CON_S:::services
+     RES_S:::services
+     COU_S:::services
+     E_COU:::domain
+     E_CON:::domain
+     E_USR:::domain
+     E_ORD:::domain
+     E_RES:::domain
+     BROWSER:::client
+     DB:::onprem
+    classDef client fill:#d7e9f7,stroke:#6ca0dc,color:#000
+    classDef presentation fill:#e1ecf4,stroke:#2b6ca3,color:#000
+    classDef views fill:#f2f5f7,stroke:#7da0b9,color:#000
+    classDef security fill:#e7f0dc,stroke:#7a9a4b,color:#000
+    classDef services fill:#ede6f7,stroke:#7e68a4,color:#000
+    classDef domain fill:#f7efe7,stroke:#a07c52,color:#000
+    classDef onprem fill:#e5e5e5,stroke:#777,color:#000
+    classDef monitoring fill:#f9fbdc,stroke:#c6bf44,color:#000
