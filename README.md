@@ -258,67 +258,7 @@ A food delivery platform built with Java 21 + Spring Boot, following event-drive
 
 The platform uses two distinct communication patterns: **north-south** traffic enters via Kong Cloud Gateway through the Istio Gateway, while **east-west** traffic between services uses a mix of synchronous HTTP (via Istio mTLS) and asynchronous Kafka events (via external MSK).
 
-```mermaid
-graph TB
-    subgraph external ["North-South Traffic (Kong → Istio Gateway)"]
-        KONG["Kong Cloud Gateway<br/>OIDC Cognito Auth"]
-    end
-
-    subgraph munchgo_ns ["munchgo namespace (Istio Ambient mTLS)"]
-        AUTH3["auth-service<br/>:8080<br/>Cognito Facade"]
-        CONSUMER3["consumer-service<br/>:8080<br/>Customer Profiles"]
-        RESTAURANT3["restaurant-service<br/>:8080<br/>Menus & Items"]
-        ORDER3["order-service<br/>:8080<br/>CQRS + Event Sourcing"]
-        COURIER3["courier-service<br/>:8080<br/>Delivery Assignments"]
-        SAGA3["saga-orchestrator<br/>:8080<br/>Saga Coordination"]
-    end
-
-    subgraph messaging ["Async Messaging (external to mesh)"]
-        KAFKA["Amazon MSK<br/>Kafka 3.6.0"]
-    end
-
-    subgraph storage ["Persistent Storage"]
-        DB[("Amazon RDS PostgreSQL 16<br/>Shared Instance · 6 Databases")]
-    end
-
-    KONG -->|/api/v1/auth — Public| AUTH3
-    KONG -->|/api/v1/consumers — OIDC| CONSUMER3
-    KONG -->|/api/v1/restaurants — OIDC| RESTAURANT3
-    KONG -->|/api/v1/orders — OIDC| ORDER3
-    KONG -->|/api/v1/couriers — OIDC| COURIER3
-    KONG -->|/api/v1/sagas — OIDC| SAGA3
-
-    SAGA3 -->|"HTTP POST (Istio mTLS)"| CONSUMER3
-    SAGA3 -->|"HTTP GET (Istio mTLS)"| RESTAURANT3
-    SAGA3 -->|"HTTP POST/PUT (Istio mTLS)"| ORDER3
-
-    AUTH3 -.->|"Kafka: user-events"| KAFKA
-    SAGA3 -.->|"Kafka: saga-commands"| KAFKA
-    KAFKA -.->|"Kafka: user-events"| CONSUMER3
-    KAFKA -.->|"Kafka: user-events"| COURIER3
-    KAFKA -.->|"Kafka: saga-replies"| SAGA3
-
-    AUTH3 -->|munchgo_auth| DB
-    CONSUMER3 -->|munchgo_consumers| DB
-    RESTAURANT3 -->|munchgo_restaurants| DB
-    ORDER3 -->|munchgo_orders| DB
-    COURIER3 -->|munchgo_couriers| DB
-    SAGA3 -->|munchgo_sagas| DB
-
-    style KONG fill:#003459,color:#fff
-    style AUTH3 fill:#2E8B57,color:#fff
-    style CONSUMER3 fill:#2E8B57,color:#fff
-    style RESTAURANT3 fill:#2E8B57,color:#fff
-    style ORDER3 fill:#2E8B57,color:#fff
-    style COURIER3 fill:#2E8B57,color:#fff
-    style SAGA3 fill:#8B0000,color:#fff
-    style KAFKA fill:#FF9900,color:#fff
-    style DB fill:#3B48CC,color:#fff
-    style external fill:#E8E8E8,stroke:#999,color:#333
-    style munchgo_ns fill:#F0F0F0,stroke:#BBB,color:#333
-    style messaging fill:#F5F5F5,stroke:#CCC,color:#333
-    style storage fill:#F5F5F5,stroke:#CCC,color:#333
-```
+![MunchGo Service Architecture](docs/images/MunchGo%20-%20Service%20Architecture.png)
 
 > **Solid arrows** between services = synchronous HTTP calls, encrypted by Istio ztunnel mTLS and authorized by waypoint L7 policy.
 > **Dashed arrows** to/from Kafka = asynchronous events, external to the mesh (Amazon MSK).
