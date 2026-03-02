@@ -348,7 +348,7 @@ sync_kong_config() {
     fi
 
     local REGION="${KONNECT_REGION:-au}"
-    local CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-kong-cloud-gateway-eks}"
+    local CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-MunchGo}"
 
     log "Syncing Kong configuration to Konnect (${CP_NAME})..."
     if deck gateway sync "$KONG_FILE" \

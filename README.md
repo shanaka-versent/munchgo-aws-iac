@@ -1079,12 +1079,13 @@ graph TB
 cp .env.example .env
 ```
 
-Edit `.env` — only **3 values** needed:
+Edit `.env` — only **4 values** needed:
 
 ```bash
+AWS_PROFILE="stax-stax-au1-versent-innovation"
 KONNECT_REGION="au"
 KONNECT_TOKEN="kpat_your_token_here"
-KONNECT_CONTROL_PLANE_NAME="kong-cloud-gateway-eks"
+KONNECT_CONTROL_PLANE_NAME="MunchGo"
 ```
 
 > `.env` is **gitignored** — your token never gets committed. All scripts auto-source it.
@@ -1111,7 +1112,8 @@ ArgoCD immediately begins syncing all Layer 3 child apps via **sync waves** in d
 ```bash
 aws eks update-kubeconfig \
   --name $(terraform -chdir=terraform output -raw cluster_name) \
-  --region ap-southeast-2
+  --region ap-southeast-2 \
+  --profile stax-stax-au1-versent-innovation
 ```
 
 ### Step 4: Generate TLS Certificates
@@ -1129,8 +1131,8 @@ Generates a self-signed CA + server certificate and **automatically creates** th
 ```
 
 Fully automates Konnect and AWS setup:
-1. Creates Konnect control plane (`cloud_gateway: true`)
-2. Provisions Cloud Gateway network (~30 minutes)
+1. Creates Konnect control plane named **`MunchGo`** (`cloud_gateway: true`)
+2. Provisions Cloud Gateway network named `munchgo-eks-network` (~30 minutes)
 3. Shares Transit Gateway via AWS RAM
 4. Auto-accepts TGW attachment
 

@@ -8,6 +8,12 @@ variable "region" {
   default     = "ap-southeast-2"
 }
 
+variable "aws_profile" {
+  description = "AWS CLI profile to use for authentication"
+  type        = string
+  default     = "stax-stax-au1-versent-innovation"
+}
+
 variable "environment" {
   description = "Environment name"
   type        = string

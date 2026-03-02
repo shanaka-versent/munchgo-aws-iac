@@ -41,8 +41,8 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error(){ echo -e "${RED}[ERROR]${NC} $*"; }
 info() { echo -e "${CYAN}[CONFIG]${NC} $*"; }
 
-CP_NAME="kong-cloud-gateway-eks"
-DCGW_NETWORK_NAME="eks-backend-network"
+CP_NAME="MunchGo"
+DCGW_NETWORK_NAME="munchgo-eks-network"
 DCGW_CIDR="192.168.0.0/16"
 KONG_GW_VERSION="3.9"
 
