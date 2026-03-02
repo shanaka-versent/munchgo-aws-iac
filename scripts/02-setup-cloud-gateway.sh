@@ -167,14 +167,35 @@ create_network() {
     NETWORK_ID=$(echo "$NETWORK_RESPONSE" | jq -r '.id')
 
     if [[ -z "$NETWORK_ID" || "$NETWORK_ID" == "null" ]]; then
-        error "Failed to create network"
-        error "Response: $NETWORK_RESPONSE"
-        warn "You may need to create this via Konnect UI instead."
-        return
+        # Check for quota exceeded — fall back to an existing ready network in the same region
+        QUOTA_ERROR=$(echo "$NETWORK_RESPONSE" | jq -r '.title // ""')
+        if [[ "$QUOTA_ERROR" == "Quota Exceeded" ]]; then
+            warn "Network quota reached — looking for an existing ready network in ap-southeast-2..."
+            EXISTING_NETWORKS=$(curl -s \
+                "https://global.api.konghq.com/v2/cloud-gateways/networks" \
+                -H "Authorization: Bearer $KONNECT_TOKEN")
+            NETWORK_ID=$(echo "$EXISTING_NETWORKS" | jq -r \
+                '.data[] | select(.region == "ap-southeast-2" and .state == "ready") | .id' | head -1)
+            if [[ -n "$NETWORK_ID" && "$NETWORK_ID" != "null" ]]; then
+                NETWORK_NAME=$(echo "$EXISTING_NETWORKS" | jq -r \
+                    ".data[] | select(.id == \"$NETWORK_ID\") | .name")
+                log "  Reusing existing network: ${NETWORK_NAME} (${NETWORK_ID})"
+            else
+                error "Failed to create network and no existing ready network found in ap-southeast-2"
+                error "Response: $NETWORK_RESPONSE"
+                warn "Create or free up a network in Konnect UI, then re-run."
+                return
+            fi
+        else
+            error "Failed to create network"
+            error "Response: $NETWORK_RESPONSE"
+            warn "You may need to create this via Konnect UI instead."
+            return
+        fi
+    else
+        log "  Network ID: ${NETWORK_ID}"
+        log "  Network provisioning takes ~30 minutes. Check status in Konnect dashboard."
     fi
-
-    log "  Network ID: ${NETWORK_ID}"
-    log "  Network provisioning takes ~30 minutes. Check status in Konnect dashboard."
 }
 
 # ---------------------------------------------------------------------------
