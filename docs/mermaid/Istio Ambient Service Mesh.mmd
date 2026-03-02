@@ -1,0 +1,96 @@
+graph TD
+    EXTERNAL["Kong Cloud GW<br>via Transit GW"]
+
+    subgraph MESH["Istio Ambient Service Mesh"]
+
+        subgraph INGRESS["istio-ingress namespace · ambient: enabled"]
+            GW["kong-cloud-gw-gateway<br>gatewayClassName: istio<br>Internal NLB · HTTP:80 · HTTPS:443"]
+        end
+
+        subgraph DATAPLANE["Ambient Data Plane — No Sidecars"]
+            ZTUNNEL["ztunnel DaemonSet<br>L4 Proxy · mTLS · SPIFFE IDs"]
+            WAYPOINT["munchgo-waypoint<br>L7 Proxy · HBONE:15008<br>gatewayClassName: istio-waypoint"]
+        end
+
+        subgraph SERVICES["munchgo namespace · ambient: enabled"]
+            AUTH["auth-service"]
+            ORDER["order-service"]
+            SAGA["saga-orchestrator"]
+            CONSUMER["consumer-service"]
+            RESTAURANT["restaurant-service"]
+            COURIER["courier-service"]
+        end
+
+        subgraph CTRL["Istio Control Plane"]
+            ISTIOD["istiod"]
+            ISTIO_BASE["istio-base"]
+            ISTIO_CNI["istio-cni"]
+        end
+
+        subgraph SEC["Security Policies"]
+            PEER_AUTH["PeerAuthentication: STRICT mTLS"]
+            AP_GW["allow-gateway-ingress · L7"]
+            AP_L4["allow-gateway-ingress-l4 · L4"]
+            AP_INTRA["allow-intra-munchgo-l4 · L4"]
+            AP_SAGA["allow-saga-orchestrator · L7"]
+            AP_HEALTH["allow-health-checks · L7"]
+        end
+
+        subgraph OBS["Observability"]
+            JAEGER["Jaeger Tracing"]
+            PROM["Prometheus"]
+            ENVOY_LOG["Envoy Logs"]
+            KIALI["Kiali"]
+        end
+    end
+
+    EXTERNAL --> GW
+    GW --> ZTUNNEL
+    ZTUNNEL -- "L4 mTLS HBONE" --> WAYPOINT
+    WAYPOINT --> AUTH
+    WAYPOINT --> ORDER
+    WAYPOINT --> SAGA
+    WAYPOINT --> CONSUMER
+    WAYPOINT --> RESTAURANT
+    WAYPOINT --> COURIER
+    SAGA -- "REST" --> ORDER
+    SAGA -- "REST" --> CONSUMER
+    SAGA -- "REST" --> RESTAURANT
+    SAGA -- "REST" --> COURIER
+    ZTUNNEL -. "enforces" .-> SEC
+    WAYPOINT -. "enforces" .-> SEC
+    WAYPOINT -. "exports" .-> OBS
+    ISTIOD -. "configures" .-> ZTUNNEL
+    ISTIOD -. "configures" .-> WAYPOINT
+    ISTIOD -. "configures" .-> GW
+
+    classDef service fill:#2E8B57,color:#fff,stroke:#2E8B57,font-weight:bold
+    classDef proxy fill:#466BB0,color:#fff,stroke:#466BB0,font-weight:bold
+    classDef policy fill:#DD344C,color:#fff,stroke:#DD344C
+    classDef observ fill:#FF9900,color:#fff,stroke:#FF9900
+    classDef ctrl fill:#003459,color:#fff,stroke:#003459
+    classDef external fill:#424242,color:#fff,stroke:#424242
+
+    AUTH:::service
+    ORDER:::service
+    SAGA:::service
+    CONSUMER:::service
+    RESTAURANT:::service
+    COURIER:::service
+    ZTUNNEL:::proxy
+    WAYPOINT:::proxy
+    GW:::proxy
+    ISTIOD:::ctrl
+    ISTIO_BASE:::ctrl
+    ISTIO_CNI:::ctrl
+    PEER_AUTH:::policy
+    AP_GW:::policy
+    AP_L4:::policy
+    AP_INTRA:::policy
+    AP_SAGA:::policy
+    AP_HEALTH:::policy
+    JAEGER:::observ
+    PROM:::observ
+    ENVOY_LOG:::observ
+    KIALI:::observ
+    EXTERNAL:::external

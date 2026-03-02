@@ -1,0 +1,33 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+ subgraph mesh_ew["munchgo namespace — Istio Ambient mTLS"]
+        SAGA_EW["saga-orchestrator"]
+        CONSUMER_EW["consumer-service"]
+        RESTAURANT_EW["restaurant-service"]
+        ORDER_EW["order-service"]
+        COURIER_EW["courier-service"]
+        AUTH_EW["auth-service"]
+  end
+ subgraph external_ew["External (outside mesh)"]
+        KAFKA_EW["Amazon MSK<br>Kafka"]
+  end
+    SAGA_EW -- HTTP POST /api/v1/consumers/{id}/validate<br>ztunnel mTLS → Waypoint L7 → ztunnel --> CONSUMER_EW
+    SAGA_EW -- HTTP GET /api/v1/restaurants/{id}<br>ztunnel mTLS → Waypoint L7 → ztunnel --> RESTAURANT_EW
+    SAGA_EW -- HTTP POST /api/v1/orders<br>ztunnel mTLS → Waypoint L7 → ztunnel --> ORDER_EW
+    SAGA_EW -. "Kafka: saga-commands<br>(assign courier)" .-> KAFKA_EW
+    KAFKA_EW -. "Kafka: saga-replies<br>(courier assigned)" .-> SAGA_EW
+    AUTH_EW -. "Kafka: user-events<br>(user registered)" .-> KAFKA_EW
+    KAFKA_EW -. "Kafka: user-events" .-> CONSUMER_EW & COURIER_EW
+
+    style SAGA_EW fill:#8B0000,color:#fff
+    style CONSUMER_EW fill:#2E8B57,color:#fff
+    style RESTAURANT_EW fill:#2E8B57,color:#fff
+    style ORDER_EW fill:#2E8B57,color:#fff
+    style COURIER_EW fill:#2E8B57,color:#fff
+    style AUTH_EW fill:#2E8B57,color:#fff
+    style KAFKA_EW fill:#FF9900,color:#fff
+    style mesh_ew fill:#F0F0F0,stroke:#BBB,color:#333
+    style external_ew fill:#F5F5F5,stroke:#CCC,color:#333
