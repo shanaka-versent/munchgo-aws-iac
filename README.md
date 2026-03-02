@@ -108,6 +108,8 @@ sequenceDiagram
 
 MunchGo uses **Istio Ambient Mesh** — zero sidecar containers. L4 mTLS is handled by **ztunnel** (DaemonSet on every node). L7 policies are enforced by a **waypoint proxy** per namespace.
 
+![Istio Ambient Service Mesh](docs/images/Istio%20Ambient%20Service%20Mesh.png)
+
 ```mermaid
 graph TB
     subgraph mesh ["Istio Ambient Mesh (munchgo namespace)"]
@@ -168,6 +170,8 @@ graph TB
 MunchGo uses a **hybrid communication model**: synchronous HTTP calls for saga orchestration (protected by Istio mTLS) and asynchronous Kafka events for domain events (via external MSK).
 
 **Only the Saga Orchestrator makes direct HTTP calls to other services.** All other services communicate exclusively via Kafka. Istio authorization policies enforce this — even though all services have ClusterIP endpoints, only authorized sources can reach them.
+
+![MunchGo East-West Traffic](docs/images/MunchGo%20-%20East-West%20Traffic.png)
 
 ```mermaid
 graph TB
