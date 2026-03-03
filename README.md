@@ -6,8 +6,6 @@ This is the **Infrastructure as Code (IaC) repository** for deploying the modern
 
 **The SPA** is deployed to **Amazon S3** and served through the same **CloudFront distribution** — hashed assets get immutable 1-year caching while `index.html` is always fresh.
 
-The underlying platform pattern — Kong Cloud Gateway, EKS, Istio Gateway API, Transit Gateway private networking, CloudFront + WAF, and the full deployment automation — is documented in the [Kong Dedicated Cloud Gateway on EKS with Istio Gateway API (Ambient Mesh)](https://github.com/shanaka-versent/Kong-Konnect-Cloud-Gateway-on-EKS) branch. **This README focuses on what's built on top**: the MunchGo application, Cognito authentication, event-driven sagas, CI/CD pipelines, and observability.
-
 ---
 
 ## Table of Contents
@@ -40,8 +38,8 @@ The underlying platform pattern — Kong Cloud Gateway, EKS, Istio Gateway API, 
   - [Grafana, Prometheus & Tracing](#grafana-prometheus--tracing)
   - [Istio Dashboards](#istio-dashboards)
   - [Kong Konnect Monitoring](#kong-konnect-monitoring)
+  - [Konnect UI](#konnect-ui)
   - [ArgoCD UI](#argocd-ui)
-- [Konnect UI](#konnect-ui)
 - [Teardown](#teardown)
 - [Terraform Variables Reference](#terraform-variables-reference)
 - [Appendix](#appendix)
@@ -1153,19 +1151,7 @@ curl http://localhost:9091/metrics | grep kong_konnect
 
 Also check Konnect's built-in analytics at [cloud.konghq.com](https://cloud.konghq.com) → **Analytics → Dashboard** — always available regardless of the EKS exporter.
 
-### ArgoCD UI
-
-```bash
-kubectl port-forward svc/argocd-server -n argocd 8080:80
-# Open http://localhost:8080
-# Username: admin
-# Password:
-terraform -chdir=terraform output -raw argocd_admin_password
-```
-
----
-
-## Konnect UI
+### Konnect UI
 
 Once deployed, everything is visible at [cloud.konghq.com](https://cloud.konghq.com):
 
@@ -1175,8 +1161,20 @@ Once deployed, everything is visible at [cloud.konghq.com](https://cloud.konghq.
 | **Gateway Health** | Gateway Manager → Data Plane Nodes (status, connections) |
 | **Routes & Services** | Gateway Manager → Routes / Services |
 | **Plugins** | Gateway Manager → Plugins (Prometheus, OpenID Connect, rate limiting, CORS, transforms) |
+| **Control Plane** | Gateway Manager → Control Planes → `MunchGo` (managed by `terraform/konnect.tf`) |
+| **Cloud Gateway Network** | Gateway Manager → Networks → `munchgo-eks-network` |
 
 The global **Prometheus plugin** is configured in `deck/kong.yaml` — it enables per-service/route metrics on the data plane, surfaced in Grafana via the Konnect Exporter (see [Kong Konnect Monitoring](#kong-konnect-monitoring)).
+
+### ArgoCD UI
+
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8080:80
+# Open http://localhost:8080
+# Username: admin
+# Password:
+terraform -chdir=terraform output -raw argocd_admin_password
+```
 
 ---
 
