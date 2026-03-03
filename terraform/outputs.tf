@@ -236,18 +236,14 @@ output "konnect_network_id" {
 }
 
 output "kong_cloud_gateway_setup_command" {
-  description = "Kong Konnect setup is now managed by Terraform (konnect.tf). TGW attachment requires a second apply after network is ready (~30 min)."
+  description = "Kong Konnect is fully managed by Terraform (konnect.tf) in a single terraform apply."
   value       = <<-EOT
-    # Konnect resources (control plane, network, data plane group) are created
-    # automatically by 'terraform apply' when konnect_token is set.
-    #
-    # Pass 1 (runs with main terraform apply):
-    #   - konnect_gateway_control_plane.munchgo
-    #   - konnect_cloud_gateway_network.munchgo
-    #   - konnect_cloud_gateway_configuration.munchgo
-    #
-    # Pass 2 (after network reaches 'ready' state ~30 min):
-    #   terraform apply -target=konnect_cloud_gateway_transit_gateway.eks
+    # All Konnect resources are created in a single 'terraform apply':
+    #   1. konnect_gateway_control_plane.munchgo    — instant
+    #   2. konnect_cloud_gateway_network.munchgo    — instant (but waits ~30 min to reach 'ready')
+    #   3. null_resource.wait_for_network_ready      — polls API every 30s until ready
+    #   4. konnect_cloud_gateway_configuration.munchgo
+    #   5. konnect_cloud_gateway_transit_gateway.eks — runs after network is ready
     #
     # Control Plane ID: ${length(konnect_gateway_control_plane.munchgo) > 0 ? konnect_gateway_control_plane.munchgo[0].id : "not yet created"}
     # Transit Gateway:  ${aws_ec2_transit_gateway.kong.id}

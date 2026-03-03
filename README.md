@@ -868,7 +868,7 @@ terraform -chdir=terraform apply
 
 Creates **all layers in one shot:**
 - **AWS infrastructure:** VPC, EKS cluster + node groups, AWS LB Controller, Transit Gateway + RAM share, ECR (6 repos), MSK (Kafka), RDS (PostgreSQL), S3 (SPA bucket), Amazon Cognito (User Pool, App Client, Groups, Pre Token Lambda, Secrets Manager)
-- **Kong Konnect (IaC):** Control plane `MunchGo`, Cloud Gateway Network, Data Plane Group — all via the `kong/konnect` Terraform provider (`terraform/konnect.tf`). The CP ID is written to Terraform state and surfaced as `terraform output konnect_control_plane_id`.
+- **Kong Konnect (IaC):** Control plane `MunchGo`, Cloud Gateway Network (waits ~30 min inline), Data Plane Group, and Transit Gateway attachment — all in one `terraform apply` via the `kong/konnect` Terraform provider (`terraform/konnect.tf`). CP ID written to state, surfaced as `terraform output konnect_control_plane_id`.
 - **GitOps:** ArgoCD + root application (App of Apps bootstrapped automatically)
 
 ArgoCD immediately begins syncing all Layer 3 child apps via sync waves. The `09-munchgo-apps.yaml` bridge (wave 8) discovers Layer 4 service Applications from the `munchgo-k8s-config` GitOps repo.
@@ -892,21 +892,22 @@ aws eks update-kubeconfig \
 
 Generates a self-signed CA + server certificate and creates the `istio-gateway-tls` Kubernetes secret automatically.
 
-### Step 5: Attach Transit Gateway (after network is ready)
+### Step 5: Wait (automatic — no action needed)
 
-The Kong Cloud Gateway Network created by `terraform apply` takes **~30 minutes** to reach `ready` state. Once ready, attach the Transit Gateway:
+The `terraform apply` in Step 2 handles everything in one shot. After creating the Cloud Gateway Network, Terraform polls the Konnect API every 30 seconds until the network reaches `ready` state (~30 minutes), then automatically attaches the Transit Gateway.
 
-```bash
-# Option A (recommended): Terraform IaC — declarative, idempotent
-terraform -chdir=terraform apply -target=konnect_cloud_gateway_transit_gateway.eks
+You will see progress in the Terraform output:
 
-# Option B: script fallback — only needed if Terraform Konnect provider is unavailable
-./scripts/02-setup-cloud-gateway.sh --tgw-only
+```
+null_resource.wait_for_network_ready[0]: Still creating...
+[Konnect] Attempt 12/90: network state = provisioning
+...
+[Konnect] Network is ready.
+konnect_cloud_gateway_transit_gateway.eks[0]: Creating...
+konnect_cloud_gateway_transit_gateway.eks[0]: Creation complete
 ```
 
-This connects Kong's managed AWS VPC (`192.168.0.0/16`) to your EKS VPC via Transit Gateway. AWS RAM auto-accepts the attachment (enabled in Terraform). No manual AWS Console steps.
-
-> **`KONNECT_CP_ID` is zero-touch** — Terraform writes it to state during `terraform apply`. `03-post-terraform-setup.sh` reads it from `terraform output konnect_control_plane_id` automatically.
+> **`KONNECT_CP_ID` is zero-touch** — Terraform writes it to state. `03-post-terraform-setup.sh` reads it from `terraform output konnect_control_plane_id` automatically.
 
 ### Step 6: Populate Config Placeholders
 

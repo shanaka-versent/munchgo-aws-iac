@@ -29,6 +29,10 @@ terraform {
       source  = "kong/konnect"
       version = "~> 2.3"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
 }
 
