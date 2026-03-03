@@ -15,6 +15,7 @@ The underlying platform pattern — Kong Cloud Gateway, EKS, Istio Gateway API, 
 - [Architecture](#architecture)
   - [Istio Ambient Service Mesh](#istio-ambient-service-mesh)
   - [East-West Traffic](#east-west-traffic--how-services-communicate)
+  - [Defence-in-Depth: Kubernetes Network Policy](#defence-in-depth-kubernetes-network-policy)
 - [MunchGo Microservices](#munchgo-microservices)
   - [Authentication — Amazon Cognito + OIDC](#authentication--amazon-cognito--oidc)
   - [Order Saga Flow](#order-saga-flow)
@@ -247,6 +248,78 @@ How it works (all automated):
 | 7 | PeerAuthentication | Strict mTLS enforcement — no plaintext allowed |
 | 8 | ClusterIP Services | No direct external access to backend services |
 | 9 | External Secrets | AWS Secrets Manager → K8s Secrets via IRSA (no hardcoded credentials) |
+| 10 | Kubernetes NetworkPolicy | VPC CNI eBPF enforcement — kernel-level L3/L4 backstop independent of Istio |
+
+---
+
+### Defence-in-Depth: Kubernetes Network Policy
+
+#### Why NetworkPolicy in addition to Istio?
+
+Istio Ambient Mesh (ztunnel + waypoint) enforces mTLS and authorization policies by intercepting pod traffic via iptables redirect rules. This is effective for the intended threat model, but relies on the iptables redirect working correctly. Edge cases exist:
+
+- **Same-node shortcuts** — traffic between two pods on the same node can take a shortcut through the kernel bridge layer that, in some CNI configurations or kernel versions, bypasses the iptables redirect before ztunnel sees it.
+- **Compromised node** — a node-level attacker with `NET_ADMIN` capability can manipulate iptables rules, causing pods to bypass ztunnel entirely.
+- **iptables drift** — race conditions during pod startup or CNI reinit windows can leave pods temporarily without ztunnel interception.
+
+Kubernetes `NetworkPolicy` resources, enforced by the **VPC CNI NetworkPolicy controller** (eBPF-based), operate at the kernel level **independently of Istio**. They drop packets before the pod's network stack even sees them — unaffected by iptables manipulation or ztunnel state.
+
+**The result is two independent enforcement layers that an attacker must bypass simultaneously:**
+
+```
+Packet from unauthorized source
+         │
+         ▼
+┌─────────────────────────────┐
+│  VPC CNI NetworkPolicy      │  ← Layer 1: kernel/eBPF drops packet
+│  (independent of Istio)     │    if source namespace/IP not allowed
+└─────────────────────────────┘
+         │ (only if CNI allows it)
+         ▼
+┌─────────────────────────────┐
+│  Istio ztunnel (HBONE mTLS) │  ← Layer 2: rejects non-mTLS or
+│  + Waypoint AuthorizationPolicy│  unauthorized service identity
+└─────────────────────────────┘
+         │ (only if mesh allows it)
+         ▼
+         Pod
+```
+
+#### What is enforced
+
+**`munchgo` namespace (microservices):**
+
+| Policy | Direction | What it allows |
+|--------|-----------|----------------|
+| `default-deny-ingress` | Ingress | Blocks everything — only explicit allows below are permitted |
+| `default-deny-egress` | Egress | Blocks everything — only explicit allows below are permitted |
+| `allow-ingress-from-istio-gateway` | Ingress | Pods in `istio-ingress` namespace (Istio Gateway) can reach all munchgo pods |
+| `allow-ingress-intra-namespace` | Ingress | Pods within `munchgo` can reach each other (saga orchestrator → services) |
+| `allow-ingress-from-observability` | Ingress | Prometheus (in `observability`) can scrape `/actuator/prometheus` |
+| `allow-kubelet-probes` | Ingress | Kubelet health checks from VPC node IPs (`10.0.0.0/16`) |
+| `allow-egress-intra-namespace` | Egress | Pods within `munchgo` can call each other |
+| `allow-egress-dns` | Egress | CoreDNS on port 53 (UDP/TCP) for service discovery |
+| `allow-egress-aws-data-services` | Egress | MSK Kafka (`:9094` TLS) and RDS PostgreSQL (`:5432`) within VPC CIDR |
+| `allow-egress-external-https` | Egress | Public internet HTTPS (`:443`) only — for Cognito JWKS auto-discovery |
+
+**`istio-ingress` namespace (Istio Gateway — Kong traffic entry point):**
+
+| Policy | Direction | What it allows |
+|--------|-----------|----------------|
+| `default-deny-ingress` | Ingress | Blocks everything except Kong and VPC health checks |
+| `default-deny-egress` | Egress | Blocks everything except munchgo, gateway-health, and DNS |
+| `allow-ingress-from-kong` | Ingress | Kong Cloud Gateway CIDR `192.168.0.0/16` (via Transit Gateway) + VPC `10.0.0.0/16` (NLB health checks) |
+| `allow-egress-to-backends` | Egress | Traffic forwarding to `munchgo` and `gateway-health` namespaces + DNS |
+
+#### How it is deployed
+
+NetworkPolicies are managed by ArgoCD (sync wave 11 — after Istio mesh policies at wave 10) from `k8s/network-policies/network-policies.yaml`. They are automatically applied on every stack creation with no manual steps.
+
+The VPC CNI NetworkPolicy controller is enabled via Terraform (`terraform/modules/eks/addons.tf`) by configuring the `vpc-cni` EKS add-on with `enableNetworkPolicy: true`. Without this configuration, the NetworkPolicy objects are stored in etcd but have **no enforcement effect** — enabling the controller is mandatory.
+
+#### Istio + NetworkPolicy interaction
+
+Because the VPC CNI NetworkPolicy controller evaluates traffic at the pod's veth interface using the original source pod IP (preserved through HBONE tunnelling), namespace-based NetworkPolicy selectors work correctly alongside Istio Ambient Mesh. No special configuration is needed to make the two systems co-operate.
 
 ---
 

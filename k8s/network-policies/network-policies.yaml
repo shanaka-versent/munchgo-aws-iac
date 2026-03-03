@@ -1,0 +1,291 @@
+# Kubernetes Network Policies — MunchGo Defence-in-Depth (L3/L4 CNI enforcement)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+#
+# These NetworkPolicies add a kernel-level (eBPF via VPC CNI) enforcement layer
+# that is completely independent of Istio's mesh policies. Even if ztunnel is
+# bypassed (compromised node, iptables misconfiguration, same-node shortcut),
+# the VPC CNI drops non-conforming packets before they reach the pod.
+#
+# Enforcement stack — all three layers operate simultaneously:
+#   L3/L4  → Kubernetes NetworkPolicy    (VPC CNI eBPF — THIS FILE)
+#   L4 mTLS → Istio PeerAuthentication  (ztunnel HBONE, SPIFFE identity)
+#   L7      → Istio AuthorizationPolicy  (waypoint proxy, per-method control)
+#
+# IMPORTANT: The VPC CNI NetworkPolicy controller must be enabled in Terraform
+# (terraform/modules/eks/addons.tf) for these policies to have any effect.
+# Without it, NetworkPolicy objects are stored in etcd but not enforced.
+#
+# Namespace coverage:
+#   munchgo       — Default deny all, allow only from Istio Gateway + intra-namespace
+#   istio-ingress — Default deny all, allow only from Kong Cloud Gateway (192.168.0.0/16)
+
+# ==============================================================================
+# MUNCHGO NAMESPACE — Microservices (auth, consumer, restaurant, order, courier, saga)
+# ==============================================================================
+
+---
+# Default deny all ingress — nothing reaches munchgo pods unless explicitly allowed below
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# Default deny all egress — munchgo pods cannot initiate connections unless explicitly allowed
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+
+---
+# Allow ingress from Istio Gateway (north-south traffic: Kong → Istio Gateway → munchgo)
+# Source namespace: istio-ingress (Istio Gateway pods live here)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-istio-gateway
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-ingress
+
+---
+# Allow intra-namespace ingress (east-west: saga orchestrator REST calls to services)
+# This covers the L3 path for: saga → consumer, saga → restaurant, saga → order, saga → courier
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-intra-namespace
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: munchgo
+
+---
+# Allow Prometheus scraping from observability namespace (/actuator/prometheus)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-observability
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+
+---
+# Allow kubelet liveness/readiness probes from VPC node IPs (10.0.0.0/16)
+# Kubelet runs on the node (not in a pod/namespace), so it uses a VPC IP address.
+# Without this, Spring Boot /actuator/health checks fail and pods restart.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kubelet-probes
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/16
+
+---
+# Allow egress within munchgo namespace (saga orchestrator → service HTTP calls)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-intra-namespace
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: munchgo
+
+---
+# Allow egress to kube-dns (CoreDNS in kube-system) for service discovery
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-dns
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Allow egress to AWS data services within the VPC (MSK Kafka, RDS PostgreSQL)
+# MSK and RDS run in private subnets of the same VPC (10.0.0.0/16).
+# Kafka TLS port (9094) and PostgreSQL port (5432) are scoped explicitly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-aws-data-services
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/16
+      ports:
+        - protocol: TCP
+          port: 9092   # MSK Kafka (plaintext — disabled in production, use 9094)
+        - protocol: TCP
+          port: 9094   # MSK Kafka (TLS)
+        - protocol: TCP
+          port: 5432   # RDS PostgreSQL
+
+---
+# Allow egress to external HTTPS (Cognito JWKS auto-discovery, ECR image pulls on init)
+# Scoped to public internet only (excludes RFC1918 private ranges).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-external-https
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+
+# ==============================================================================
+# ISTIO-INGRESS NAMESPACE — Istio Gateway (Kong → Microservices entry point)
+# ==============================================================================
+
+---
+# Default deny all ingress to Istio Gateway pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: istio-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# Allow ingress to Istio Gateway from Kong Cloud Gateway (via Transit Gateway)
+# Kong's dedicated cloud gateway uses the 192.168.0.0/16 CIDR.
+# Traffic arrives at the internal NLB (VPC: 10.0.0.0/16), which forwards to
+# the gateway pods preserving Kong's source IP through the Transit Gateway.
+# VPC range (10.0.0.0/16) is also required for NLB health checks and kubelet probes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-kong
+  namespace: istio-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.168.0.0/16   # Kong Cloud Gateway CIDR (via Transit Gateway)
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/16      # VPC (NLB health checks, kubelet probes)
+
+---
+# Default deny all egress from Istio Gateway pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: istio-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+
+---
+# Allow egress from Istio Gateway to munchgo services and gateway-health namespace
+# This is the L3 path for: Istio Gateway → munchgo pods (HTTPRoute forwarding)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-backends
+  namespace: istio-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: munchgo
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gateway-health
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

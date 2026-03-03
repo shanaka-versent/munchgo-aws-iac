@@ -1,0 +1,53 @@
+# ArgoCD App: Kubernetes Network Policies (Defence-in-Depth — L3/CNI enforcement)
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: 11 (after Istio mesh policies — both layers must be in place together)
+#
+# Deploys Kubernetes NetworkPolicy resources as the second enforcement layer
+# in the defence-in-depth security stack:
+#
+#   L3/L4  → Kubernetes NetworkPolicy  (THIS APP — VPC CNI eBPF, kernel-level)
+#   L4 mTLS → Istio PeerAuthentication (ztunnel HBONE, SPIFFE identity)
+#   L7      → Istio AuthorizationPolicy (waypoint proxy, per-method access control)
+#
+# NetworkPolicies here operate independently of Istio. Even if ztunnel is
+# bypassed (same-node shortcut, iptables drift, compromised node), the VPC CNI
+# drops non-conforming packets at the kernel level before they reach the pod.
+#
+# Namespaces covered:
+#   munchgo       — Default deny all + allow from Istio Gateway, intra-namespace,
+#                   observability (Prometheus), kubelet probes, VPC data services,
+#                   and external HTTPS (Cognito JWKS)
+#   istio-ingress — Default deny all + allow from Kong Cloud Gateway CIDR (192.168.0.0/16)
+#                   and VPC (NLB health checks), egress to munchgo + gateway-health
+#
+# Prerequisite: VPC CNI addon must be configured with enableNetworkPolicy=true
+# (terraform/modules/eks/addons.tf). Without it, these objects are stored but
+# have no enforcement effect.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: network-policies
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shanaka-versent/munchgo-aws-iac.git
+    targetRevision: HEAD
+    path: k8s/network-policies
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: munchgo   # Default namespace; resources with explicit namespace metadata override this
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
