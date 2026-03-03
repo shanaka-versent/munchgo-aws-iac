@@ -48,9 +48,9 @@ log()    { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()   { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error()  { echo -e "${RED}[ERROR]${NC} $*"; }
 
-# Konnect resource names (must match 02-setup-cloud-gateway.sh)
-CP_NAME="kong-cloud-gateway-eks"
-DCGW_NETWORK_NAME="eks-backend-network"
+# Konnect resource names — must match terraform/variables.tf defaults and 02-setup-cloud-gateway.sh
+CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-MunchGo}"
+DCGW_NETWORK_NAME="munchgo-eks-network"
 
 # ---------------------------------------------------------------------------
 # Pre-flight checks
@@ -321,27 +321,62 @@ cleanup_cloudfront_cfn_stacks() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 5: Delete Kong Cloud Gateway in Konnect (via API)
+# Step 5: Delete Kong Cloud Gateway in Konnect
 # ---------------------------------------------------------------------------
 # Deletion order:
-#   1. Delete control plane (cascades to delete configurations + data plane groups)
-#   2. Wait for data plane groups to fully terminate
-#   3. Delete Transit Gateway attachments from the network
-#   4. Delete Cloud Gateway network
+#   1. Remove Data Plane Group config (DP groups must be gone before network)
+#   2. Delete the Transit Gateway attachment from the network
+#   3. Delete Cloud Gateway network (triggers TGW detach from Kong's AWS account)
+#   4. Delete Control Plane
 #
-# NOTE: The Konnect configurations API does not support DELETE. Deleting the
-# control plane cascades to terminate all associated data plane groups.
-# The network can only be deleted after all referencing data plane groups are gone.
+# IaC path (preferred): Terraform manages CP, network, and DP group config.
+#   Targeted terraform destroy removes them in the correct order.
+# Fallback (API path): direct Konnect REST API calls (used if TF state missing).
 #
-# IMPORTANT: Must run BEFORE terraform destroy. Kong Cloud Gateway creates a
-# VPC attachment to our Transit Gateway. Terraform cannot delete the TGW until
-# Kong's attachment is removed, which happens when we delete the Konnect network.
+# IMPORTANT: Must run BEFORE the full terraform destroy. Kong Cloud Gateway
+# creates a VPC attachment to our Transit Gateway. terraform cannot delete the
+# TGW until Kong's attachment is removed — which happens when we delete the
+# Konnect network. The wait_for_kong_tgw_detach step then confirms AWS-side
+# cleanup before the full terraform destroy runs.
 #
 # Requires KONNECT_REGION and KONNECT_TOKEN (from .env)
 # ---------------------------------------------------------------------------
 delete_konnect_resources() {
     log "Step 5: Deleting Kong Cloud Gateway resources in Konnect..."
 
+    local tf_dir="${SCRIPT_DIR}/../terraform"
+    local global_api="https://global.api.konghq.com"
+
+    # --- IaC path: use terraform destroy -target for managed resources ---
+    if [[ -d "${tf_dir}/.terraform" ]]; then
+        log "  Terraform state found — removing Konnect resources via terraform destroy -target..."
+
+        local tf_args="-auto-approve"
+        if [[ -f "${tf_dir}/terraform.tfvars" ]]; then
+            tf_args="-var-file=terraform.tfvars -auto-approve"
+        fi
+
+        # Export token so the Konnect provider can authenticate during targeted destroy
+        if [[ -n "${KONNECT_TOKEN:-}" ]]; then
+            export TF_VAR_konnect_token="${KONNECT_TOKEN}"
+        fi
+
+        # Destroy in dependency order: config first (references both CP and network),
+        # then network (triggers TGW detachment from Kong's side), then CP.
+        cd "$tf_dir"
+        terraform destroy -target='konnect_cloud_gateway_configuration.munchgo[0]' $tf_args 2>/dev/null || \
+            warn "  Config destroy returned non-zero (may already be gone)"
+        terraform destroy -target='konnect_cloud_gateway_network.munchgo[0]' $tf_args 2>/dev/null || \
+            warn "  Network destroy returned non-zero (may already be gone)"
+        terraform destroy -target='konnect_gateway_control_plane.munchgo[0]' $tf_args 2>/dev/null || \
+            warn "  Control plane destroy returned non-zero (may already be gone)"
+        cd "$REPO_DIR"
+
+        log "  Konnect resources removed from Terraform state."
+        return
+    fi
+
+    # --- Fallback: API-based deletion (when no Terraform state) ---
     if [[ -z "${KONNECT_REGION:-}" || -z "${KONNECT_TOKEN:-}" ]]; then
         warn "KONNECT_REGION or KONNECT_TOKEN not set. Skipping Konnect cleanup."
         warn "Delete Cloud Gateway manually: https://cloud.konghq.com → Gateway Manager"
@@ -349,69 +384,12 @@ delete_konnect_resources() {
     fi
 
     local regional_api="https://${KONNECT_REGION}.api.konghq.com"
-    local global_api="https://global.api.konghq.com"
     local auth_header="Authorization: Bearer ${KONNECT_TOKEN}"
 
-    # --- Find control plane by name ---
-    log "  Looking up control plane: ${CP_NAME}"
-    local cp_list
-    cp_list=$(curl -s "${regional_api}/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
-        -H "$auth_header")
-    local cp_id
-    cp_id=$(echo "$cp_list" | jq -r '.data[0].id // empty')
-
-    if [[ -z "$cp_id" ]]; then
-        log "  Control plane '${CP_NAME}' not found. Skipping to network cleanup."
-    fi
-
-    # --- Delete control plane (cascades to data plane groups) ---
-    if [[ -n "$cp_id" ]]; then
-        log "  Deleting control plane: ${cp_id} (cascades to data plane groups)..."
-        local cp_delete_resp
-        cp_delete_resp=$(curl -s -w "\n%{http_code}" -X DELETE \
-            "${regional_api}/v2/control-planes/${cp_id}" \
-            -H "$auth_header")
-        local cp_http_code
-        cp_http_code=$(echo "$cp_delete_resp" | tail -1)
-
-        if [[ "$cp_http_code" == "204" || "$cp_http_code" == "200" ]]; then
-            log "  Control plane deleted."
-        else
-            warn "  Control plane deletion returned HTTP ${cp_http_code}."
-            warn "  Check: https://cloud.konghq.com → Gateway Manager"
-        fi
-
-        # Wait for data plane groups to terminate (they reference the network)
-        log "  Waiting for data plane groups to terminate..."
-        local dp_max_wait=180  # 3 minutes
-        local dp_elapsed=0
-        local dp_interval=15
-
-        while [[ $dp_elapsed -lt $dp_max_wait ]]; do
-            local dp_states
-            dp_states=$(curl -s "${global_api}/v2/cloud-gateways/configurations?filter%5Bcontrol_plane_id%5D=${cp_id}" \
-                -H "$auth_header" | jq -r '[.data[].dataplane_groups[]?.state] | join(",")' 2>/dev/null || true)
-
-            if [[ -z "$dp_states" ]]; then
-                log "  All data plane groups terminated."
-                break
-            fi
-
-            log "  Data plane group states: ${dp_states}. Waiting ${dp_interval}s... (${dp_elapsed}s/${dp_max_wait}s)"
-            sleep "$dp_interval"
-            dp_elapsed=$((dp_elapsed + dp_interval))
-        done
-
-        if [[ $dp_elapsed -ge $dp_max_wait ]]; then
-            warn "  Timed out waiting for data plane groups to terminate."
-        fi
-    fi
-
-    # --- Find and delete network + transit gateway attachments ---
+    # --- Find network and delete TGW attachments + network first ---
     log "  Looking up network: ${DCGW_NETWORK_NAME}"
     local networks
-    networks=$(curl -s "${global_api}/v2/cloud-gateways/networks" \
-        -H "$auth_header")
+    networks=$(curl -s "${global_api}/v2/cloud-gateways/networks" -H "$auth_header")
     local network_id
     network_id=$(echo "$networks" | jq -r \
         ".data[] | select(.name == \"${DCGW_NETWORK_NAME}\") | .id" | head -1)
@@ -437,7 +415,7 @@ delete_konnect_resources() {
             log "  No transit gateway attachments found."
         fi
 
-        # Delete the network
+        # Delete the network (triggers Kong-side TGW detachment)
         log "  Deleting network: ${network_id}"
         local delete_resp
         delete_resp=$(curl -s -w "\n%{http_code}" -X DELETE \
@@ -449,11 +427,37 @@ delete_konnect_resources() {
         if [[ "$http_code" == "204" || "$http_code" == "200" || "$http_code" == "202" ]]; then
             log "  Network deletion initiated."
         else
-            warn "  Network deletion returned HTTP ${http_code}. It may still be deprovisioning."
+            warn "  Network deletion returned HTTP ${http_code}."
             warn "  Check: https://cloud.konghq.com → Gateway Manager → Networks"
         fi
     else
         log "  Network '${DCGW_NETWORK_NAME}' not found."
+    fi
+
+    # --- Delete control plane (cascades to DP group configs) ---
+    log "  Looking up control plane: ${CP_NAME}"
+    local cp_list
+    cp_list=$(curl -s "${regional_api}/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
+        -H "$auth_header")
+    local cp_id
+    cp_id=$(echo "$cp_list" | jq -r '.data[0].id // empty')
+
+    if [[ -n "$cp_id" ]]; then
+        log "  Deleting control plane: ${cp_id}..."
+        local cp_delete_resp
+        cp_delete_resp=$(curl -s -w "\n%{http_code}" -X DELETE \
+            "${regional_api}/v2/control-planes/${cp_id}" \
+            -H "$auth_header")
+        local cp_http_code
+        cp_http_code=$(echo "$cp_delete_resp" | tail -1)
+
+        if [[ "$cp_http_code" == "204" || "$cp_http_code" == "200" ]]; then
+            log "  Control plane deleted."
+        else
+            warn "  Control plane deletion returned HTTP ${cp_http_code}."
+        fi
+    else
+        log "  Control plane '${CP_NAME}' not found."
     fi
 
     log "  Konnect cleanup complete."
