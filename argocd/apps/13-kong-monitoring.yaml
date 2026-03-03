@@ -1,0 +1,49 @@
+# ArgoCD App: Kong Konnect Monitoring — Pushgateway + Exporter + Dashboard
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# LAYER 3: EKS Customizations (ArgoCD)
+# Sync Wave: 12 (after Prometheus stack at wave 11)
+#
+# Deploys into the observability namespace (same as Prometheus/Grafana):
+#   - Prometheus Pushgateway (push-based metrics receiver)
+#   - konnect-analytics-exporter CronJob (queries Konnect API every minute)
+#   - kong-konnect-dashboard ConfigMap (auto-discovered by Grafana sidecar)
+#
+# Prerequisites (created by 03-post-terraform-setup.sh):
+#   kubectl create secret generic konnect-token \
+#     --from-literal=token=<KONNECT_TOKEN> \
+#     --from-literal=cp_id=<KONNECT_CP_ID> \
+#     -n observability
+#
+# Monitoring flow:
+#   CronJob → Konnect Analytics API → push → Pushgateway
+#   Prometheus → scrape → Pushgateway → store
+#   Grafana → PromQL → Prometheus → "Kong Konnect — Gateway Metrics" dashboard
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kong-monitoring
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "12"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shanaka-versent/munchgo-aws-iac.git
+    targetRevision: main
+    path: k8s/monitoring
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

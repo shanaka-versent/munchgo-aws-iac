@@ -72,6 +72,13 @@ spec:
                     action: keep
                     regex: istiod;http-monitoring
 
+              # Prometheus Pushgateway — receives Kong Konnect analytics metrics
+              # pushed by the konnect-analytics-exporter CronJob every minute.
+              - job_name: 'pushgateway'
+                honor_labels: true   # preserve job/instance labels pushed by the exporter
+                static_configs:
+                  - targets: ['prometheus-pushgateway.observability.svc.cluster.local:9091']
+
         # AlertManager
         alertmanager:
           enabled: false  # Enable in production

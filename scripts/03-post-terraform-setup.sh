@@ -401,6 +401,40 @@ update_insomnia_url() {
 }
 
 # ---------------------------------------------------------------------------
+# Create Konnect token K8s secret for the analytics exporter CronJob
+# ---------------------------------------------------------------------------
+# The konnect-analytics-exporter CronJob reads KONNECT_TOKEN and KONNECT_CP_ID
+# from this secret to authenticate with the Konnect Analytics API.
+#
+# KONNECT_TOKEN  — set in .env (same token used by decK sync)
+# KONNECT_CP_ID  — the control-plane UUID from Konnect UI:
+#                  Gateway Manager → your control plane → Settings → ID
+#                  Set KONNECT_CP_ID in .env to enable this step.
+# ---------------------------------------------------------------------------
+create_konnect_token_secret() {
+    if [[ -z "${KONNECT_TOKEN:-}" ]]; then
+        warn "KONNECT_TOKEN not set — skipping konnect-token secret creation"
+        warn "Set KONNECT_TOKEN and KONNECT_CP_ID in .env and re-run to enable Kong monitoring"
+        return
+    fi
+
+    if [[ -z "${KONNECT_CP_ID:-}" ]]; then
+        warn "KONNECT_CP_ID not set — skipping konnect-token secret creation"
+        warn "Find KONNECT_CP_ID in Konnect UI: Gateway Manager → control plane → Settings → ID"
+        warn "Add KONNECT_CP_ID=<uuid> to .env and re-run to enable Kong monitoring"
+        return
+    fi
+
+    log "Creating konnect-token secret in observability namespace..."
+    kubectl create secret generic konnect-token \
+        --from-literal=token="${KONNECT_TOKEN}" \
+        --from-literal=cp_id="${KONNECT_CP_ID}" \
+        -n observability \
+        --dry-run=client -o yaml | kubectl apply -f -
+    info "  konnect-token secret created (token + cp_id)"
+}
+
+# ---------------------------------------------------------------------------
 # Seed default admin user
 # ---------------------------------------------------------------------------
 seed_admin_user() {
@@ -462,6 +496,7 @@ main() {
     create_service_databases
     create_kafka_secret
     sync_kong_config
+    create_konnect_token_secret
     seed_admin_user
     show_next_steps
 }

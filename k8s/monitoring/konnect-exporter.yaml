@@ -1,0 +1,225 @@
+# Kong Konnect Analytics Exporter — CronJob + ConfigMap
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# Queries the Konnect Analytics API every minute and pushes metrics to
+# Prometheus Pushgateway so Prometheus can scrape them.
+#
+# Metrics exported (per service and route):
+#   kong_konnect_requests_total          — total requests in the last minute
+#   kong_konnect_request_latency_ms_p99  — 99th-percentile end-to-end latency
+#   kong_konnect_upstream_latency_ms_p99 — 99th-percentile upstream latency
+#   kong_konnect_4xx_total               — 4xx responses in the last minute
+#   kong_konnect_5xx_total               — 5xx responses in the last minute
+#
+# Prerequisites (created by 03-post-terraform-setup.sh):
+#   kubectl create secret generic konnect-token \
+#     --from-literal=token=<KONNECT_TOKEN> \
+#     --from-literal=cp_id=<KONNECT_CP_ID> \
+#     -n observability
+#
+# The KONNECT_CP_ID is the control-plane ID visible in Konnect UI under
+# Gateway Manager → your control plane → Settings → ID.
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: konnect-exporter-script
+  namespace: observability
+data:
+  exporter.py: |
+    #!/usr/bin/env python3
+    """
+    Konnect Analytics → Prometheus Pushgateway exporter.
+    Runs inside a CronJob every minute.
+    """
+    import os
+    import sys
+    import json
+    import time
+    import urllib.request
+    import urllib.error
+    from datetime import datetime, timezone, timedelta
+
+    KONNECT_TOKEN  = os.environ["KONNECT_TOKEN"]
+    KONNECT_CP_ID  = os.environ["KONNECT_CP_ID"]
+    PUSHGATEWAY    = os.environ.get("PUSHGATEWAY_URL", "http://prometheus-pushgateway.observability.svc.cluster.local:9091")
+    KONNECT_API    = "https://global.api.konghq.com"
+    JOB_NAME       = "kong_konnect"
+
+    def konnect_query(payload):
+        """POST to Konnect Analytics API and return parsed JSON."""
+        url = f"{KONNECT_API}/v2/analytics/requests"
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {KONNECT_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            print(f"[ERROR] Konnect API {e.code}: {body}", file=sys.stderr)
+            return None
+        except Exception as e:
+            print(f"[ERROR] Konnect API request failed: {e}", file=sys.stderr)
+            return None
+
+    def build_metrics_text(results):
+        """Convert Konnect analytics results to Prometheus text format."""
+        lines = []
+
+        # Metadata headers
+        lines.append("# HELP kong_konnect_requests_total Total requests through Kong in the last minute")
+        lines.append("# TYPE kong_konnect_requests_total gauge")
+        lines.append("# HELP kong_konnect_4xx_total 4xx responses through Kong in the last minute")
+        lines.append("# TYPE kong_konnect_4xx_total gauge")
+        lines.append("# HELP kong_konnect_5xx_total 5xx responses through Kong in the last minute")
+        lines.append("# TYPE kong_konnect_5xx_total gauge")
+        lines.append("# HELP kong_konnect_request_latency_ms_p99 P99 end-to-end latency in milliseconds")
+        lines.append("# TYPE kong_konnect_request_latency_ms_p99 gauge")
+        lines.append("# HELP kong_konnect_upstream_latency_ms_p99 P99 upstream latency in milliseconds")
+        lines.append("# TYPE kong_konnect_upstream_latency_ms_p99 gauge")
+
+        if not results:
+            # Emit zeros so Grafana shows the series even when there's no traffic
+            cp = KONNECT_CP_ID
+            for metric in ["requests_total", "4xx_total", "5xx_total",
+                           "request_latency_ms_p99", "upstream_latency_ms_p99"]:
+                lines.append(f'kong_konnect_{metric}{{control_plane="{cp}",service="all"}} 0')
+            return "\n".join(lines) + "\n"
+
+        for entry in results.get("data", []):
+            svc   = entry.get("service_name") or entry.get("service_id", "unknown")
+            route = entry.get("route_name")   or entry.get("route_id", "unknown")
+            cp    = KONNECT_CP_ID
+            labels = f'control_plane="{cp}",service="{svc}",route="{route}"'
+
+            total    = entry.get("request_count", 0)
+            c4xx     = entry.get("4xx_count", 0)
+            c5xx     = entry.get("5xx_count", 0)
+            lat_p99  = entry.get("p99_latency_ms", 0)
+            up_p99   = entry.get("p99_upstream_latency_ms", 0)
+
+            lines.append(f"kong_konnect_requests_total{{{labels}}} {total}")
+            lines.append(f"kong_konnect_4xx_total{{{labels}}} {c4xx}")
+            lines.append(f"kong_konnect_5xx_total{{{labels}}} {c5xx}")
+            lines.append(f"kong_konnect_request_latency_ms_p99{{{labels}}} {lat_p99}")
+            lines.append(f"kong_konnect_upstream_latency_ms_p99{{{labels}}} {up_p99}")
+
+        return "\n".join(lines) + "\n"
+
+    def push_to_gateway(metrics_text):
+        """PUT metrics to Pushgateway using the text exposition format."""
+        url = f"{PUSHGATEWAY}/metrics/job/{JOB_NAME}"
+        data = metrics_text.encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "text/plain; version=0.0.4"},
+            method="PUT",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                print(f"[OK] Pushed to Pushgateway: {resp.status}")
+        except Exception as e:
+            print(f"[ERROR] Push failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    def main():
+        now   = datetime.now(timezone.utc)
+        start = now - timedelta(minutes=2)  # 2-min window for eventual consistency
+
+        payload = {
+            "filters": {
+                "control_plane_ids": [KONNECT_CP_ID],
+            },
+            "granularity": "minutely",
+            "time_range": {
+                "type": "absolute",
+                "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end":   now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+            "metrics": [
+                "request_count",
+                "response_latency_p99",
+                "upstream_latency_p99",
+            ],
+            "dimensions": ["service", "route"],
+        }
+
+        print(f"[INFO] Querying Konnect Analytics: {start.isoformat()} → {now.isoformat()}")
+        result = konnect_query(payload)
+
+        metrics_text = build_metrics_text(result)
+        print(f"[INFO] Pushing {len(metrics_text)} bytes to Pushgateway")
+        push_to_gateway(metrics_text)
+
+    if __name__ == "__main__":
+        main()
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: konnect-analytics-exporter
+  namespace: observability
+  labels:
+    app: konnect-analytics-exporter
+spec:
+  # Run every minute — matches Konnect Analytics 'minutely' granularity
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid        # Skip if previous run is still going
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 55    # Must finish before next run
+      template:
+        metadata:
+          labels:
+            app: konnect-analytics-exporter
+        spec:
+          restartPolicy: Never
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+          volumes:
+            - name: script
+              configMap:
+                name: konnect-exporter-script
+                defaultMode: 0755
+          containers:
+            - name: exporter
+              image: python:3.12-alpine
+              command: ["python3", "/scripts/exporter.py"]
+              env:
+                - name: KONNECT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: konnect-token
+                      key: token
+                - name: KONNECT_CP_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: konnect-token
+                      key: cp_id
+                - name: PUSHGATEWAY_URL
+                  value: "http://prometheus-pushgateway.observability.svc.cluster.local:9091"
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi

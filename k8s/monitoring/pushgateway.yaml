@@ -1,0 +1,85 @@
+# Prometheus Pushgateway — Kong Konnect Metrics Bridge
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# Push-based metrics receiver for the Konnect analytics exporter CronJob.
+# The CronJob queries the Konnect Analytics API every minute and pushes
+# Kong gateway metrics here. Prometheus scrapes this endpoint.
+#
+# Why Pushgateway?
+#   Kong Dedicated Cloud Gateway data plane runs in Kong's managed cloud
+#   (192.168.0.0/16). The Prometheus metrics port (8100) is unreachable
+#   from EKS directly. Pushgateway acts as an intermediary — the CronJob
+#   pushes IN, Prometheus pulls OUT.
+#
+# Flow:
+#   CronJob → POST metrics → Pushgateway:9091
+#   Prometheus → GET /metrics → Pushgateway:9091 (additionalScrapeConfig)
+#   Grafana → PromQL → Prometheus → Kong dashboard
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-pushgateway
+  namespace: observability
+  labels:
+    app: prometheus-pushgateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-pushgateway
+  template:
+    metadata:
+      labels:
+        app: prometheus-pushgateway
+    spec:
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: pushgateway
+          image: prom/pushgateway:v1.9.0
+          args:
+            - --web.listen-address=:9091
+            - --persistence.interval=5m
+          ports:
+            - containerPort: 9091
+              name: metrics
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9091
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9091
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-pushgateway
+  namespace: observability
+  labels:
+    app: prometheus-pushgateway
+spec:
+  selector:
+    app: prometheus-pushgateway
+  ports:
+    - name: metrics
+      port: 9091
+      targetPort: 9091
+  type: ClusterIP

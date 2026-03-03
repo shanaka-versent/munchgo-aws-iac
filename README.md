@@ -27,6 +27,9 @@ The underlying platform pattern — Kong Cloud Gateway, EKS, Istio Gateway API, 
   - [Automated Post-Deployment Testing](#automated-post-deployment-testing)
 - [Verification](#verification)
 - [Observability](#observability)
+  - [Accessing Grafana](#accessing-grafana)
+  - [Istio Dashboards in Grafana](#istio-dashboards-in-grafana)
+  - [Kong Konnect Monitoring](#kong-konnect-monitoring)
 - [Konnect UI](#konnect-ui)
 - [Teardown](#teardown)
 - [Appendix](#appendix)
@@ -795,7 +798,9 @@ gantt
 
     section Observability
     Prometheus + Grafana (wave 11)      :e1, 10, 11
-    Kiali + Jaeger (wave 12)            :e2, 11, 12
+    Network Policies (wave 11)          :e2, 10, 11
+    Kiali + Jaeger (wave 12)            :e3, 11, 12
+    Kong Monitoring (wave 12)           :e4, 11, 12
 ```
 
 | Wave | Application | What Gets Deployed |
@@ -810,8 +815,8 @@ gantt
 | 8 | external-secrets, munchgo-apps | ESO Helm chart + MunchGo services (from GitOps repo) |
 | 9 | external-secrets-config | ClusterSecretStore + ExternalSecrets (DB credentials) |
 | 10 | istio-mesh-policies | Waypoint proxy, AuthorizationPolicy, PeerAuthentication, Telemetry |
-| 11 | prometheus-stack | kube-prometheus-stack + Grafana dashboards |
-| 12 | kiali, jaeger | Service mesh dashboard + distributed tracing |
+| 11 | prometheus-stack, network-policies | kube-prometheus-stack + Grafana + Kubernetes NetworkPolicies |
+| 12 | kiali, jaeger, kong-monitoring | Service mesh dashboard + distributed tracing + Kong Konnect metrics exporter |
 
 ### Architecture Layers
 
@@ -1221,6 +1226,10 @@ curl -H "Authorization: Bearer $ACCESS_TOKEN" $APP_URL/api/v1/orders
 
 ```mermaid
 graph TB
+    subgraph kong_cloud ["Kong Konnect (managed cloud)"]
+        KONG["Dedicated Cloud Gateway<br/>Data Plane"]
+    end
+
     subgraph mesh_services ["MunchGo Services (Istio Ambient)"]
         SVC["6 Microservices<br/>+ Waypoint Proxy"]
     end
@@ -1230,29 +1239,147 @@ graph TB
         GRAF["Grafana<br/>Dashboards"]
         JAEGER["Jaeger<br/>Distributed Tracing"]
         KIALI3["Kiali<br/>Service Mesh Topology"]
+        PUSH["Pushgateway<br/>Kong Metrics Bridge"]
+        CRON["CronJob<br/>Konnect Exporter"]
     end
 
+    KONG -->|"Analytics API<br/>(HTTPS)"| CRON
+    CRON -->|"push metrics<br/>every 1 min"| PUSH
+    PUSH -->|"scrape"| PROM
     SVC -->|"Prometheus scrape<br/>:15020/stats/prometheus"| PROM
     SVC -->|"OTLP traces<br/>:4317"| JAEGER
     PROM --> GRAF
     PROM --> KIALI3
     JAEGER --> KIALI3
 
+    style KONG fill:#003459,color:#fff
     style SVC fill:#2E8B57,color:#fff
     style PROM fill:#E6522C,color:#fff
     style GRAF fill:#F46800,color:#fff
     style JAEGER fill:#60D0E4,color:#000
     style KIALI3 fill:#003459,color:#fff
+    style PUSH fill:#E6522C,color:#fff
+    style CRON fill:#555,color:#fff
+    style kong_cloud fill:#E8F4F8,stroke:#007BFF,color:#333
     style mesh_services fill:#F0F0F0,stroke:#BBB,color:#333
     style obs_stack fill:#F5F5F5,stroke:#CCC,color:#333
 ```
 
 | Tool | Access | Purpose |
 |------|--------|---------|
-| **Grafana** | `kubectl port-forward svc/prometheus-stack-grafana -n observability 3000:80` | Metrics dashboards (Istio, K8s, MunchGo) |
+| **Grafana** | `kubectl port-forward svc/prometheus-grafana -n observability 3000:80` | Metrics dashboards (Istio, K8s, Kong Konnect) |
 | **Kiali** | `kubectl port-forward svc/kiali -n observability 20001:20001` | Service mesh topology, traffic flow visualization |
 | **Jaeger** | `kubectl port-forward svc/jaeger-query -n observability 16686:16686` | Distributed traces across microservices |
-| **Prometheus** | `kubectl port-forward svc/prometheus-stack-kube-prom-prometheus -n observability 9090:9090` | Raw metrics queries (PromQL) |
+| **Prometheus** | `kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n observability 9090:9090` | Raw metrics queries (PromQL) |
+
+### Accessing Grafana
+
+```bash
+# Port-forward Grafana to localhost
+kubectl port-forward svc/prometheus-grafana -n observability 3000:80
+
+# Open http://localhost:3000
+# Username: admin
+# Password: admin   (see grafana.adminPassword in argocd/apps/11-prometheus.yaml)
+```
+
+To query raw Prometheus metrics directly:
+
+```bash
+kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n observability 9090:9090
+# Open http://localhost:9090
+# Example queries:
+#   kong_konnect_requests_total              — Kong request count by service
+#   kong_konnect_request_latency_ms_p99      — P99 gateway latency
+#   istio_requests_total                     — Istio mesh request count
+#   container_cpu_usage_seconds_total        — Pod CPU usage
+```
+
+### Istio Dashboards in Grafana
+
+The `kube-prometheus-stack` Grafana includes a sidecar that auto-discovers
+dashboards from ConfigMaps labelled `grafana_dashboard=1` across all namespaces.
+Istio ships a set of dashboards specifically built for this integration.
+
+**How to import the Istio dashboards:**
+
+1. Open Grafana at `http://localhost:3000`
+2. Go to **Dashboards → Import**
+3. Import by Grafana.com ID — paste one of the IDs below and click **Load**:
+
+| Dashboard | Grafana ID | What it shows |
+|-----------|-----------|---------------|
+| Istio Mesh | `7639` | Global mesh traffic, request rates, error rates |
+| Istio Service | `7636` | Per-service inbound/outbound metrics |
+| Istio Workload | `7630` | Per-workload (pod) metrics |
+| Istio Control Plane | `7645` | istiod performance, config push latency |
+| Istio Performance | `11829` | ztunnel/proxy CPU, memory, connection counts |
+
+> These dashboards query `istio_*` metrics that Prometheus already scrapes
+> from ztunnel and the waypoint proxy at `:15020/stats/prometheus`.
+
+### Kong Konnect Monitoring
+
+Kong's Dedicated Cloud Gateway data plane runs in Kong's managed cloud. Its
+Prometheus metrics port (8100) is not directly reachable from EKS Prometheus.
+The platform bridges this gap with a push-based pipeline:
+
+```
+Konnect Analytics API (HTTPS)
+        ↓  CronJob every 1 min (konnect-analytics-exporter)
+  Pushgateway:9091  (prometheus-pushgateway in observability ns)
+        ↓  Prometheus scrapes every 15s
+    Prometheus
+        ↓  PromQL
+    Grafana — "Kong Konnect — Gateway Metrics" dashboard
+```
+
+**Metrics available in Grafana:**
+
+| Metric | Description |
+|--------|-------------|
+| `kong_konnect_requests_total` | Total requests per service/route (last minute) |
+| `kong_konnect_4xx_total` | Client errors per service/route |
+| `kong_konnect_5xx_total` | Server errors per service/route |
+| `kong_konnect_request_latency_ms_p99` | P99 end-to-end gateway latency (ms) |
+| `kong_konnect_upstream_latency_ms_p99` | P99 upstream (EKS backend) latency (ms) |
+
+**Dashboard:** Grafana → Dashboards → search **"Kong Konnect"** → *Kong Konnect — Gateway Metrics*
+
+**One-time setup — Konnect token secret:**
+
+The `03-post-terraform-setup.sh` script creates this secret automatically when
+`KONNECT_TOKEN` and `KONNECT_CP_ID` are set in `.env`. To create it manually:
+
+```bash
+# Find KONNECT_CP_ID in Konnect UI:
+#   Gateway Manager → your control plane → Settings → ID (UUID)
+
+kubectl create secret generic konnect-token \
+  --from-literal=token="$KONNECT_TOKEN" \
+  --from-literal=cp_id="$KONNECT_CP_ID" \
+  -n observability
+```
+
+**Verify the exporter is running:**
+
+```bash
+# Check CronJob schedule (runs every minute)
+kubectl get cronjob konnect-analytics-exporter -n observability
+
+# Check recent job runs
+kubectl get jobs -n observability -l app=konnect-analytics-exporter
+
+# Check exporter logs
+kubectl logs -n observability -l app=konnect-analytics-exporter --tail=50
+
+# Verify metrics arrived at Pushgateway
+kubectl port-forward svc/prometheus-pushgateway -n observability 9091:9091
+curl http://localhost:9091/metrics | grep kong_konnect
+```
+
+**Also check Konnect's built-in analytics** at [cloud.konghq.com](https://cloud.konghq.com) under
+**Analytics → Dashboard** — this is always available regardless of the EKS exporter.
 
 ### ArgoCD UI
 
@@ -1273,7 +1400,12 @@ Once deployed, everything is visible at [cloud.konghq.com](https://cloud.konghq.
 | **API Analytics** | Analytics → Dashboard (request counts, latency P50/P95/P99, error rates) |
 | **Gateway Health** | Gateway Manager → Data Plane Nodes (status, connections) |
 | **Routes & Services** | Gateway Manager → Routes / Services |
-| **Plugins** | Gateway Manager → Plugins (OpenID Connect, rate limiting, CORS, transforms) |
+| **Plugins** | Gateway Manager → Plugins (Prometheus, OpenID Connect, rate limiting, CORS, transforms) |
+
+> The global **Prometheus plugin** is configured in `deck/kong.yaml` — it enables
+> per-service/route metrics on the data plane, which are exposed via the Konnect
+> Analytics API and surfaced in Grafana via the Konnect Exporter (see
+> [Kong Konnect Monitoring](#kong-konnect-monitoring)).
 
 ---
 
