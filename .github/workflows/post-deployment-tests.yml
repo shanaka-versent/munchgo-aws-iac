@@ -6,23 +6,21 @@
 #
 # Triggers:
 #   1. Push to main changing deck/kong.yaml
-#      → Syncs Kong Gateway config (deck gateway sync) THEN runs tests
-#        (covers Kong API layer changes: new routes, plugins, rate limits)
+#      → Syncs Kong Gateway config (deck gateway sync) THEN waits for health THEN tests
 #
 #   2. repository_dispatch with event_type: microservice-deployed
 #      → Triggered automatically by the munchgo-microservices CI pipeline
-#        after ArgoCD confirms the new image is healthy on the cluster
-#        (covers microservice deployments: new features, bug fixes)
+#        after the GitOps repo is updated (ArgoCD syncs within ~3 min).
+#        The api-tests job polls /healthz until the platform is ready.
 #
 #   3. workflow_dispatch (manual)
 #      → Run tests on demand at any time, with optional URL override
 #
 # Secrets required (Settings → Secrets and variables → Actions):
-#   KONNECT_TOKEN   — Kong Konnect Personal Access Token (used for deck sync only)
+#   KONNECT_TOKEN   — Kong Konnect Personal Access Token (deck sync only)
 #
 # The base_url in the Insomnia collection is kept current automatically by
-# scripts/03-post-terraform-setup.sh which updates it from 'terraform output'
-# whenever a new environment is provisioned.
+# scripts/03-post-terraform-setup.sh on every new environment provision.
 
 name: Post-Deployment API Tests
 
@@ -33,13 +31,7 @@ on:
     paths:
       - 'deck/kong.yaml'
 
-  # Trigger 2: Called from microservice CI pipeline after ArgoCD confirms healthy deploy
-  # In munchgo-microservices CI, add after ArgoCD sync confirmation:
-  #   curl -X POST \
-  #     -H "Authorization: token ${{ secrets.INFRA_REPO_TOKEN }}" \
-  #     -H "Accept: application/vnd.github.v3+json" \
-  #     https://api.github.com/repos/shanaka-versent/munchgo-aws-iac/dispatches \
-  #     -d '{"event_type":"microservice-deployed","client_payload":{"service":"${{ env.SERVICE_NAME }}"}}'
+  # Trigger 2: Called from munchgo-microservices CI after GitOps repo update
   repository_dispatch:
     types: [microservice-deployed]
 
@@ -50,10 +42,6 @@ on:
         description: 'Override base URL (leave empty to use value in collection)'
         required: false
         default: ''
-      wait_seconds:
-        description: 'Seconds to wait before testing (propagation delay)'
-        required: false
-        default: '15'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -76,13 +64,13 @@ jobs:
           deck version
 
       - name: Sync Kong Gateway config to Konnect
+        env:
+          KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
         run: |
           deck gateway sync deck/kong.yaml \
             --konnect-addr https://au.api.konghq.com \
-            --konnect-token "${{ secrets.KONNECT_TOKEN }}" \
+            --konnect-token "$KONNECT_TOKEN" \
             --konnect-control-plane-name MunchGo
-        env:
-          KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
 
   # ---------------------------------------------------------------------------
   # Job 2: Run API integration tests (always runs, after kong-sync if applicable)
@@ -117,30 +105,38 @@ jobs:
           mv /tmp/collection-override.json insomnia/munchgo-api.json
           echo "base_url overridden to: ${{ github.event.inputs.base_url }}"
 
-      - name: Show base URL being tested
+      - name: Show target URL and trigger context
+        id: context
         run: |
           BASE_URL=$(jq -r '.resources[] | select(._type == "environment") | .data.base_url' insomnia/munchgo-api.json)
+          echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
           echo "Testing against: $BASE_URL"
           echo "Trigger: ${{ github.event_name }}"
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
             echo "Deployed service: ${{ github.event.client_payload.service }}"
+            echo "Image SHA: ${{ github.event.client_payload.sha }}"
           fi
 
-      - name: Wait for deployment to propagate
+      # Poll /healthz until the platform is ready (or timeout after 5 min).
+      # Covers: ArgoCD sync delay (~3 min) + pod rolling update (~1-2 min).
+      # Skipped for manual dispatch where platform is assumed already running.
+      - name: Wait for platform to be healthy
         if: github.event_name != 'workflow_dispatch'
         run: |
-          WAIT="${{ github.event.inputs.wait_seconds || '15' }}"
-          echo "Waiting ${WAIT}s for changes to propagate..."
-          sleep "$WAIT"
-
-      - name: Wait for propagation (manual with custom wait)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.wait_seconds != '0'
-        run: |
-          WAIT="${{ github.event.inputs.wait_seconds }}"
-          if [ "$WAIT" -gt 0 ] 2>/dev/null; then
-            echo "Waiting ${WAIT}s..."
-            sleep "$WAIT"
-          fi
+          echo "Polling $BASE_URL/healthz (up to 5 min)..."
+          for i in $(seq 1 20); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE_URL/healthz" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✓ Platform healthy after attempt $i ($((i * 15))s)"
+              break
+            fi
+            if [ "$i" -eq 20 ]; then
+              echo "✗ Platform not healthy after 5 min (last HTTP status: $STATUS)"
+              exit 1
+            fi
+            echo "  Attempt $i: HTTP $STATUS — retrying in 15s..."
+            sleep 15
+          done
 
       - name: Run MunchGo API Integration Tests
         run: |
@@ -149,11 +145,10 @@ jobs:
             --ci \
             insomnia/munchgo-api.json
 
-      - name: Upload test results on failure
+      - name: Upload collection on failure (for debugging)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: api-test-results
-          path: |
-            insomnia/
+          name: api-test-results-${{ github.run_id }}
+          path: insomnia/munchgo-api.json
           retention-days: 7
