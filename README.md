@@ -6,6 +6,8 @@ This is the **Infrastructure as Code (IaC) repository** for deploying the modern
 
 **The SPA** is deployed to **Amazon S3** and served through the same **CloudFront distribution** — hashed assets get immutable 1-year caching while `index.html` is always fresh.
 
+The underlying platform pattern — Kong Cloud Gateway, EKS, Istio Gateway API, Transit Gateway private networking, CloudFront + WAF, and the full deployment automation — is documented in the [Kong Dedicated Cloud Gateway on EKS with Istio Gateway API (Ambient Mesh)](https://github.com/shanaka-versent/Kong-Konnect-Cloud-Gateway-on-EKS) repo. **This README focuses on what's built on top**: the MunchGo application, Cognito authentication, event-driven sagas, CI/CD pipelines, and observability.
+
 ---
 
 ## Table of Contents
