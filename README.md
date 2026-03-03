@@ -1153,21 +1153,11 @@ The Insomnia collection runs automatically as a GitHub Actions workflow ([`.gith
 
 `scripts/03-post-terraform-setup.sh` automatically updates `base_url` in `insomnia/munchgo-api.json` from `terraform output application_url` every time a new environment is provisioned. The GitHub Actions workflow always uses the URL stored in the collection file — no secrets or variables to update manually.
 
-#### Connecting the microservices CI pipeline (one-time setup)
+#### Microservices CI pipeline — already wired up
 
-Add the following step to the **end** of the `munchgo-microservices` GitHub Actions workflow, after ArgoCD confirms the deployment is healthy:
+A `trigger-api-tests` job has been added to all 6 microservice workflows in `munchgo-microservices`. It runs automatically after every `update-gitops` job and reuses the existing `GITOPS_TOKEN` secret — no new secret or manual step needed.
 
-```yaml
-- name: Trigger post-deployment API tests
-  run: |
-    curl -X POST \
-      -H "Authorization: token ${{ secrets.INFRA_REPO_TOKEN }}" \
-      -H "Accept: application/vnd.github.v3+json" \
-      https://api.github.com/repos/shanaka-versent/munchgo-aws-iac/dispatches \
-      -d "{\"event_type\":\"microservice-deployed\",\"client_payload\":{\"service\":\"$SERVICE_NAME\"}}"
-```
-
-`INFRA_REPO_TOKEN` is a GitHub Personal Access Token (or fine-grained token) with **Contents: Read** and **Actions: Write** permissions on `munchgo-aws-iac`. Add it to the microservices repo secrets.
+What it does: after the GitOps image tag is committed, it sends a `repository_dispatch` event to `munchgo-aws-iac`, which wakes up the `post-deployment-tests.yml` workflow. That workflow then polls `/healthz` until ArgoCD finishes the rolling deploy, then runs the full test suite.
 
 #### Required GitHub Actions secret
 
