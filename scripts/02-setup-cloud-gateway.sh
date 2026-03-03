@@ -3,16 +3,15 @@
 # @author Shanaka Jayasundera - shanakaj@gmail.com
 #
 # NOTE: Kong Konnect is now managed as Terraform IaC (terraform/konnect.tf).
-# 'terraform apply' handles: control plane, network, data plane group,
-# and Transit Gateway attachment automatically using the kong/konnect provider.
+# 'terraform apply' handles: control plane, network, and data plane group
+# via the kong/konnect Terraform provider.
 #
 # This script serves two purposes:
 #   1. FALLBACK — if Terraform Konnect provider is not available, this script
 #      creates all resources via the Konnect REST API directly.
-#   2. TGW ATTACHMENT ONLY — skip Steps 1-3 (--tgw-only flag) and only run
-#      the Transit Gateway attachment once the network reaches 'ready' state.
-#      This is equivalent to:
-#        terraform apply -target=konnect_cloud_gateway_transit_gateway.eks
+#   2. TGW ATTACHMENT ONLY (recommended post-terraform step) — use --tgw-only
+#      after 'terraform apply'. The network takes ~30 min to reach 'ready' state;
+#      this script polls and attaches the Transit Gateway once ready.
 #
 # For the recommended IaC approach, see terraform/konnect.tf.
 # Token is read from .env (KONNECT_TOKEN) — same source as TF_VAR_konnect_token.

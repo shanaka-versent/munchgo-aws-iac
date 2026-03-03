@@ -868,7 +868,7 @@ terraform -chdir=terraform apply
 
 Creates **all layers in one shot:**
 - **AWS infrastructure:** VPC, EKS cluster + node groups, AWS LB Controller, Transit Gateway + RAM share, ECR (6 repos), MSK (Kafka), RDS (PostgreSQL), S3 (SPA bucket), Amazon Cognito (User Pool, App Client, Groups, Pre Token Lambda, Secrets Manager)
-- **Kong Konnect (IaC):** Control plane `MunchGo`, Cloud Gateway Network (waits ~30 min inline), Data Plane Group, and Transit Gateway attachment — all in one `terraform apply` via the `kong/konnect` Terraform provider (`terraform/konnect.tf`). CP ID written to state, surfaced as `terraform output konnect_control_plane_id`.
+- **Kong Konnect (IaC):** Control plane `MunchGo`, Cloud Gateway Network, and Data Plane Group — managed declaratively via the `kong/konnect` Terraform provider ([terraform/konnect.tf](terraform/konnect.tf)). The CP ID is written to Terraform state and surfaced as `terraform output konnect_control_plane_id`. Transit Gateway attachment requires the network to reach `ready` state (~30 min) and runs separately in Step 5.
 - **GitOps:** ArgoCD + root application (App of Apps bootstrapped automatically)
 
 ArgoCD immediately begins syncing all Layer 3 child apps via sync waves. The `09-munchgo-apps.yaml` bridge (wave 8) discovers Layer 4 service Applications from the `munchgo-k8s-config` GitOps repo.
@@ -922,7 +922,7 @@ Reads all Terraform outputs and populates every placeholder across the deploymen
 
 The script also:
 - **Creates the Kafka config secret** from MSK bootstrap brokers
-- **Resolves `KONNECT_CP_ID`** — reads from `.env` if already set (written by Step 5), or auto-looks up from Konnect API by control-plane name. Persists to `.env` for future runs.
+- **Resolves `KONNECT_CP_ID`** — three-priority lookup: (1) `.env` if already set, (2) `terraform output konnect_control_plane_id` from Terraform state, (3) Konnect API lookup by control-plane name. Persists to `.env` for future runs.
 - **Creates `konnect-token` K8s secret** in the `observability` namespace (used by the Kong analytics exporter CronJob)
 - **Syncs Kong routes to Konnect** via `deck gateway sync`
 - **Seeds the default admin user** (`admin@munchgo.com` / `Admin@123`) in Cognito and auth-service database
