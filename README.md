@@ -1186,15 +1186,20 @@ The global **Prometheus plugin** is configured in `deck/kong.yaml` — it enable
 ./scripts/destroy.sh
 ```
 
+> **Always use `./scripts/destroy.sh` — never run `terraform destroy` directly.**
+>
+> The Transit Gateway attachment is created by the setup script (Step 5) via the Konnect REST API and lives in Kong's AWS account. It is **not tracked in Terraform state**. If you run `terraform destroy` directly, it attempts to delete `aws_ec2_transit_gateway` and the Konnect network concurrently — AWS blocks TGW deletion while Kong's attachment is still active and the destroy fails with a `DependencyViolation`. The script handles the correct sequencing.
+
 Tears down the **full stack** in the correct order:
 
 1. **Delete Istio Gateway** → triggers NLB deprovisioning
 2. **Wait for NLB/ENI cleanup** → prevents VPC deletion failures
 3. **Delete ArgoCD apps** → cascade removes all workloads
 4. **Cleanup CRDs** → removes Gateway API and Istio CRDs
-5. **Terraform destroy** → removes EKS, VPC, TGW, RAM, ECR, MSK, RDS, S3, Cognito, CloudFront + WAF
-6. **Cleanup CloudFormation stacks** → safety net for orphaned CFN
-7. **Delete Konnect resources** → removes Cloud Gateway via API
+5. **Delete Konnect resources** → `terraform destroy -target` removes CP, network, and DP group in order (network deletion triggers Kong's TGW attachment removal from their AWS account)
+6. **Wait for Kong's TGW detach** → confirms AWS-side cleanup before TGW is deleted
+7. **Terraform destroy** → removes EKS, VPC, TGW, RAM, ECR, MSK, RDS, S3, Cognito, CloudFront + WAF
+8. **Cleanup CloudFormation stacks** → safety net for orphaned CFN
 
 After teardown, re-running the deployment steps creates a fresh environment. The `KONNECT_CP_ID` is resolved automatically — no manual configuration needed.
 
