@@ -1039,12 +1039,27 @@ graph TB
 
 ### Grafana, Prometheus & Tracing
 
-| Tool | Port-Forward Command | Credentials | Purpose |
-|------|---------------------|-------------|---------|
-| **Grafana** | `kubectl port-forward svc/prometheus-grafana -n observability 3000:80` | admin / admin | Metrics dashboards (Istio, K8s, Kong Konnect) |
-| **Prometheus** | `kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n observability 9090:9090` | — | Raw PromQL queries |
-| **Kiali** | `kubectl port-forward svc/kiali -n observability 20001:20001` | — | Service mesh topology, live traffic graph |
-| **Jaeger** | `kubectl port-forward svc/jaeger-query -n observability 16686:16686` | — | Distributed traces across microservices |
+| Tool | Port-Forward Command | URL | Credentials |
+|------|---------------------|-----|-------------|
+| **Grafana** | `kubectl port-forward svc/prometheus-grafana -n observability 3000:80` | http://localhost:3000 | admin / admin |
+| **Prometheus** | `kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n observability 9090:9090` | http://localhost:9090 | — |
+| **Kiali** | `kubectl port-forward svc/kiali -n observability 20001:20001` | http://localhost:20001 | — |
+| **Jaeger** | `kubectl port-forward svc/jaeger-query -n observability 16686:16686` | http://localhost:16686 | — |
+
+**Accessing Grafana step by step:**
+
+```bash
+# 1. Port-forward Grafana
+kubectl port-forward svc/prometheus-grafana -n observability 3000:80
+
+# 2. Open http://localhost:3000 in your browser
+#    Username: admin
+#    Password: admin
+
+# 3. Go to Dashboards → Browse to see all available dashboards
+#    The Kong Konnect dashboard is auto-loaded (search "Kong Konnect")
+#    Istio dashboards need a one-time import — see next section
+```
 
 **Useful PromQL queries** (Prometheus at `http://localhost:9090`):
 
@@ -1057,20 +1072,25 @@ container_cpu_usage_seconds_total    — Pod CPU
 
 ### Istio Dashboards
 
-Grafana's dashboard sidecar auto-discovers ConfigMaps labelled `grafana_dashboard=1`. To import the official Istio dashboards:
+Grafana comes with Prometheus and the Kong dashboard pre-wired, but **Istio dashboards are not pre-loaded** — you import them once from grafana.com. They connect to the `istio_*` metrics that Prometheus is already scraping from ztunnel and the waypoint proxy at `:15020/stats/prometheus`.
 
-1. Open Grafana → **Dashboards → Import**
-2. Enter the Grafana.com ID and click **Load**
+**How to import (one-time, takes ~2 minutes):**
 
-| Dashboard | Grafana ID | What it shows |
-|-----------|-----------|---------------|
-| Istio Mesh | `7639` | Global mesh traffic, request rates, error rates |
-| Istio Service | `7636` | Per-service inbound/outbound metrics |
-| Istio Workload | `7630` | Per-workload (pod) metrics |
-| Istio Control Plane | `7645` | istiod performance, config push latency |
-| Istio Performance | `11829` | ztunnel/proxy CPU, memory, connection counts |
+1. Open Grafana → `http://localhost:3000`
+2. Click **Dashboards** in the left sidebar → **New → Import**
+3. Paste one of the IDs below into the **"Import via grafana.com"** box → click **Load**
+4. Select **Prometheus** as the data source → click **Import**
+5. Repeat for each dashboard you want
 
-These dashboards query `istio_*` metrics that Prometheus already scrapes from ztunnel and the waypoint proxy at `:15020/stats/prometheus`.
+| Dashboard | ID | What it shows | Start here? |
+|-----------|----|---------------|-------------|
+| **Istio Mesh** | `7639` | All services — request rate, error rate, latency across the whole mesh | ✓ Start here |
+| Istio Service | `7636` | Drill into one service — inbound vs outbound, top request paths |  |
+| Istio Workload | `7630` | Per-pod metrics — useful when debugging a specific pod |  |
+| Istio Control Plane | `7645` | istiod health — config push latency, pilot errors |  |
+| Istio Performance | `11829` | ztunnel/waypoint proxy CPU, memory, and connection counts |  |
+
+> **Start with `7639` (Istio Mesh)** — it gives the best high-level view of all MunchGo services talking to each other through the mesh. You'll see request rates and error rates for auth-service, consumer-service, order-service, etc. in one place.
 
 ### Kong Konnect Monitoring
 
