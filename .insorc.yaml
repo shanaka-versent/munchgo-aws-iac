@@ -1,0 +1,12 @@
+# inso CLI configuration — MunchGo API Collection
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# Used by .github/workflows/post-deployment-tests.yml to run API integration
+# tests after every microservice deployment and Kong config change.
+#
+# Docs: https://docs.insomnia.rest/inso-cli/configuration
+
+options:
+  ci: false                           # set to true in CI (workflow passes --ci flag)
+  src: insomnia/munchgo-api.json      # default collection file
+  env: Base Environment               # default Insomnia environment

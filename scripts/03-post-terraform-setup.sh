@@ -363,6 +363,44 @@ sync_kong_config() {
 }
 
 # ---------------------------------------------------------------------------
+# Update Insomnia collection with the CloudFront URL
+# ---------------------------------------------------------------------------
+# Called every time a new environment is created so the GitHub Actions
+# post-deployment test workflow always uses the correct base URL.
+# Requires: jq (brew install jq)
+# ---------------------------------------------------------------------------
+update_insomnia_url() {
+    local INSOMNIA_FILE="${REPO_DIR}/insomnia/munchgo-api.json"
+
+    if [[ ! -f "$INSOMNIA_FILE" ]]; then
+        warn "insomnia/munchgo-api.json not found — skipping Insomnia URL update"
+        return
+    fi
+
+    if [[ -z "$APP_URL" ]]; then
+        warn "CloudFront URL not available — insomnia/munchgo-api.json base_url not updated"
+        warn "Re-run this script after 'terraform apply' with CloudFront enabled"
+        return
+    fi
+
+    if ! command -v jq &>/dev/null; then
+        warn "jq not found — skipping Insomnia URL update. Install with: brew install jq"
+        return
+    fi
+
+    log "Updating insomnia/munchgo-api.json base_url → ${APP_URL}..."
+
+    local TMP_FILE
+    TMP_FILE=$(mktemp)
+
+    jq --arg url "$APP_URL" \
+        '(.resources[] | select(._type == "environment") | .data.base_url) = $url' \
+        "$INSOMNIA_FILE" > "$TMP_FILE" && mv "$TMP_FILE" "$INSOMNIA_FILE"
+
+    info "  Insomnia base_url → ${APP_URL}"
+}
+
+# ---------------------------------------------------------------------------
 # Seed default admin user
 # ---------------------------------------------------------------------------
 seed_admin_user() {
@@ -385,7 +423,7 @@ show_next_steps() {
     echo "=========================================="
     echo ""
     echo "  1. Commit the populated config files:"
-    echo "     git add deck/kong.yaml k8s/external-secrets/"
+    echo "     git add deck/kong.yaml k8s/external-secrets/ insomnia/munchgo-api.json"
     echo "     git commit -m 'Populate deployment placeholders from terraform outputs'"
     echo ""
     echo "  2. Generate a test token:"
@@ -420,6 +458,7 @@ main() {
     populate_external_secrets
     populate_eso_irsa
     populate_k8s_overlay
+    update_insomnia_url
     create_service_databases
     create_kafka_secret
     sync_kong_config

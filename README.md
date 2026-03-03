@@ -23,6 +23,8 @@ The underlying platform pattern — Kong Cloud Gateway, EKS, Istio Gateway API, 
 - [GitOps Pipeline](#gitops-pipeline)
 - [Prerequisites](#prerequisites)
 - [Deployment](#deployment)
+- [API Testing — Insomnia Collection](#api-testing--insomnia-collection)
+  - [Automated Post-Deployment Testing](#automated-post-deployment-testing)
 - [Verification](#verification)
 - [Observability](#observability)
 - [Konnect UI](#konnect-ui)
@@ -1134,6 +1136,44 @@ After-response scripts automatically chain: login captures tokens → create req
 | **Saga Orchestrator** | 2 | OIDC Bearer | Create order saga, get saga status |
 
 > **Note:** Individual service folders also contain after-response scripts for ID chaining when running requests manually.
+
+### Automated Post-Deployment Testing
+
+The Insomnia collection runs automatically as a GitHub Actions workflow ([`.github/workflows/post-deployment-tests.yml`](.github/workflows/post-deployment-tests.yml)) after every deployment — no manual trigger needed for normal operations.
+
+#### What triggers the tests
+
+| Trigger | When | What it covers |
+|---------|------|----------------|
+| Push to `deck/kong.yaml` on `main` | Kong API config change (new route, plugin, rate limit) | Syncs Kong via `deck gateway sync` **then** runs tests |
+| `repository_dispatch: microservice-deployed` | Microservice CI pipeline confirms ArgoCD deploy is healthy | Tests the newly deployed service version end-to-end |
+| `workflow_dispatch` | Manual run (with optional URL override) | On-demand test at any time |
+
+#### How the CF URL stays current across environments
+
+`scripts/03-post-terraform-setup.sh` automatically updates `base_url` in `insomnia/munchgo-api.json` from `terraform output application_url` every time a new environment is provisioned. The GitHub Actions workflow always uses the URL stored in the collection file — no secrets or variables to update manually.
+
+#### Connecting the microservices CI pipeline (one-time setup)
+
+Add the following step to the **end** of the `munchgo-microservices` GitHub Actions workflow, after ArgoCD confirms the deployment is healthy:
+
+```yaml
+- name: Trigger post-deployment API tests
+  run: |
+    curl -X POST \
+      -H "Authorization: token ${{ secrets.INFRA_REPO_TOKEN }}" \
+      -H "Accept: application/vnd.github.v3+json" \
+      https://api.github.com/repos/shanaka-versent/munchgo-aws-iac/dispatches \
+      -d "{\"event_type\":\"microservice-deployed\",\"client_payload\":{\"service\":\"$SERVICE_NAME\"}}"
+```
+
+`INFRA_REPO_TOKEN` is a GitHub Personal Access Token (or fine-grained token) with **Contents: Read** and **Actions: Write** permissions on `munchgo-aws-iac`. Add it to the microservices repo secrets.
+
+#### Required GitHub Actions secret
+
+| Secret | Where set | Used by |
+|--------|-----------|---------|
+| `KONNECT_TOKEN` | `munchgo-aws-iac` → Settings → Secrets | `deck gateway sync` (push to `deck/kong.yaml` trigger only) |
 
 ---
 

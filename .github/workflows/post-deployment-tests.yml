@@ -1,0 +1,159 @@
+# Post-Deployment API Integration Tests — MunchGo Platform
+# @author Shanaka Jayasundera - shanakaj@gmail.com
+#
+# Runs the full MunchGo order lifecycle API test suite (13 requests) against
+# the live CloudFront → Kong → Istio → Microservices stack after every deployment.
+#
+# Triggers:
+#   1. Push to main changing deck/kong.yaml
+#      → Syncs Kong Gateway config (deck gateway sync) THEN runs tests
+#        (covers Kong API layer changes: new routes, plugins, rate limits)
+#
+#   2. repository_dispatch with event_type: microservice-deployed
+#      → Triggered automatically by the munchgo-microservices CI pipeline
+#        after ArgoCD confirms the new image is healthy on the cluster
+#        (covers microservice deployments: new features, bug fixes)
+#
+#   3. workflow_dispatch (manual)
+#      → Run tests on demand at any time, with optional URL override
+#
+# Secrets required (Settings → Secrets and variables → Actions):
+#   KONNECT_TOKEN   — Kong Konnect Personal Access Token (used for deck sync only)
+#
+# The base_url in the Insomnia collection is kept current automatically by
+# scripts/03-post-terraform-setup.sh which updates it from 'terraform output'
+# whenever a new environment is provisioned.
+
+name: Post-Deployment API Tests
+
+on:
+  # Trigger 1: Kong Gateway config changes pushed to main
+  push:
+    branches: [main]
+    paths:
+      - 'deck/kong.yaml'
+
+  # Trigger 2: Called from microservice CI pipeline after ArgoCD confirms healthy deploy
+  # In munchgo-microservices CI, add after ArgoCD sync confirmation:
+  #   curl -X POST \
+  #     -H "Authorization: token ${{ secrets.INFRA_REPO_TOKEN }}" \
+  #     -H "Accept: application/vnd.github.v3+json" \
+  #     https://api.github.com/repos/shanaka-versent/munchgo-aws-iac/dispatches \
+  #     -d '{"event_type":"microservice-deployed","client_payload":{"service":"${{ env.SERVICE_NAME }}"}}'
+  repository_dispatch:
+    types: [microservice-deployed]
+
+  # Trigger 3: Manual — run tests at any time with optional URL override
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Override base URL (leave empty to use value in collection)'
+        required: false
+        default: ''
+      wait_seconds:
+        description: 'Seconds to wait before testing (propagation delay)'
+        required: false
+        default: '15'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Sync Kong Gateway config (only runs when deck/kong.yaml is pushed)
+  # ---------------------------------------------------------------------------
+  kong-sync:
+    name: Sync Kong Gateway Config
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install decK CLI
+        run: |
+          curl -sL https://github.com/Kong/deck/releases/download/v1.40.3/deck_1.40.3_linux_amd64.tar.gz \
+            | tar xz -C /tmp
+          sudo mv /tmp/deck /usr/local/bin/deck
+          deck version
+
+      - name: Sync Kong Gateway config to Konnect
+        run: |
+          deck gateway sync deck/kong.yaml \
+            --konnect-addr https://au.api.konghq.com \
+            --konnect-token "${{ secrets.KONNECT_TOKEN }}" \
+            --konnect-control-plane-name MunchGo
+        env:
+          KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Run API integration tests (always runs, after kong-sync if applicable)
+  # ---------------------------------------------------------------------------
+  api-tests:
+    name: MunchGo API Integration Tests
+    runs-on: ubuntu-latest
+    needs: [kong-sync]
+    # Run even when kong-sync was skipped (non-push triggers) or succeeded
+    if: |
+      always() &&
+      (needs.kong-sync.result == 'success' || needs.kong-sync.result == 'skipped')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install inso CLI
+        run: npm install -g @kong/inso
+
+      - name: Override base_url in collection (workflow_dispatch only)
+        if: github.event.inputs.base_url != ''
+        run: |
+          jq --arg url "${{ github.event.inputs.base_url }}" \
+            '(.resources[] | select(._type == "environment") | .data.base_url) = $url' \
+            insomnia/munchgo-api.json > /tmp/collection-override.json
+          mv /tmp/collection-override.json insomnia/munchgo-api.json
+          echo "base_url overridden to: ${{ github.event.inputs.base_url }}"
+
+      - name: Show base URL being tested
+        run: |
+          BASE_URL=$(jq -r '.resources[] | select(._type == "environment") | .data.base_url' insomnia/munchgo-api.json)
+          echo "Testing against: $BASE_URL"
+          echo "Trigger: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "Deployed service: ${{ github.event.client_payload.service }}"
+          fi
+
+      - name: Wait for deployment to propagate
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          WAIT="${{ github.event.inputs.wait_seconds || '15' }}"
+          echo "Waiting ${WAIT}s for changes to propagate..."
+          sleep "$WAIT"
+
+      - name: Wait for propagation (manual with custom wait)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.wait_seconds != '0'
+        run: |
+          WAIT="${{ github.event.inputs.wait_seconds }}"
+          if [ "$WAIT" -gt 0 ] 2>/dev/null; then
+            echo "Waiting ${WAIT}s..."
+            sleep "$WAIT"
+          fi
+
+      - name: Run MunchGo API Integration Tests
+        run: |
+          inso run collection "MunchGo API Collection" \
+            --env "Base Environment" \
+            --ci \
+            insomnia/munchgo-api.json
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-test-results
+          path: |
+            insomnia/
+          retention-days: 7
