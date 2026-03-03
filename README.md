@@ -892,20 +892,15 @@ aws eks update-kubeconfig \
 
 Generates a self-signed CA + server certificate and creates the `istio-gateway-tls` Kubernetes secret automatically.
 
-### Step 5: Wait (automatic — no action needed)
+### Step 5: Attach Transit Gateway (after network is ready)
 
-The `terraform apply` in Step 2 handles everything in one shot. After creating the Cloud Gateway Network, Terraform polls the Konnect API every 30 seconds until the network reaches `ready` state (~30 minutes), then automatically attaches the Transit Gateway.
+The Cloud Gateway Network created by `terraform apply` takes **~30 minutes** to reach `ready` state. Once ready, run the TGW attachment script — it polls the Konnect API until the network is confirmed ready then attaches automatically:
 
-You will see progress in the Terraform output:
-
+```bash
+./scripts/02-setup-cloud-gateway.sh --tgw-only
 ```
-null_resource.wait_for_network_ready[0]: Still creating...
-[Konnect] Attempt 12/90: network state = provisioning
-...
-[Konnect] Network is ready.
-konnect_cloud_gateway_transit_gateway.eks[0]: Creating...
-konnect_cloud_gateway_transit_gateway.eks[0]: Creation complete
-```
+
+This looks up the existing control plane and network (created by Terraform), shares the Transit Gateway via AWS RAM, and attaches it. The script exits cleanly if the TGW is already attached (idempotent).
 
 > **`KONNECT_CP_ID` is zero-touch** — Terraform writes it to state. `03-post-terraform-setup.sh` reads it from `terraform output konnect_control_plane_id` automatically.
 
