@@ -1,15 +1,15 @@
 # Kong Konnect Analytics Exporter — CronJob + ConfigMap
 # @author Shanaka Jayasundera - shanakaj@gmail.com
 #
-# Queries the Konnect Analytics API every minute and pushes metrics to
-# Prometheus Pushgateway so Prometheus can scrape them.
+# Queries the Konnect /v2/api-requests endpoint every minute and pushes
+# aggregated metrics to Prometheus Pushgateway so Prometheus can scrape them.
 #
 # Metrics exported (per service and route):
-#   kong_konnect_requests_total          — total requests in the last minute
+#   kong_konnect_requests_total          — total requests in the last 2 minutes
 #   kong_konnect_request_latency_ms_p99  — 99th-percentile end-to-end latency
 #   kong_konnect_upstream_latency_ms_p99 — 99th-percentile upstream latency
-#   kong_konnect_4xx_total               — 4xx responses in the last minute
-#   kong_konnect_5xx_total               — 5xx responses in the last minute
+#   kong_konnect_4xx_total               — 4xx responses in the last 2 minutes
+#   kong_konnect_5xx_total               — 5xx responses in the last 2 minutes
 #
 # Prerequisites (created by 03-post-terraform-setup.sh):
 #   kubectl create secret generic konnect-token \
@@ -17,8 +17,9 @@
 #     --from-literal=cp_id=<KONNECT_CP_ID> \
 #     -n observability
 #
-# The KONNECT_CP_ID is the control-plane ID visible in Konnect UI under
-# Gateway Manager → your control plane → Settings → ID.
+# KONNECT_CP_ID  — control-plane UUID from Konnect UI:
+#                  Gateway Manager → your control plane → Settings → ID
+# KONNECT_REGION — Konnect API region (default: au). Set via CronJob env var.
 
 ---
 apiVersion: v1
@@ -30,33 +31,51 @@ data:
   exporter.py: |
     #!/usr/bin/env python3
     """
-    Konnect Analytics → Prometheus Pushgateway exporter.
+    Konnect /v2/api-requests -> Prometheus Pushgateway exporter.
+
+    Fetches raw request logs for the last 2 minutes, filters to our control
+    plane in Python (server-side filtering returns 400 on this endpoint),
+    aggregates per (service, route): total count, 4xx, 5xx, P99 latencies.
     Runs inside a CronJob every minute.
     """
     import os
     import sys
     import json
-    import time
     import urllib.request
     import urllib.error
     from datetime import datetime, timezone, timedelta
 
     KONNECT_TOKEN  = os.environ["KONNECT_TOKEN"]
     KONNECT_CP_ID  = os.environ["KONNECT_CP_ID"]
-    PUSHGATEWAY    = os.environ.get("PUSHGATEWAY_URL", "http://prometheus-pushgateway.observability.svc.cluster.local:9091")
-    KONNECT_API    = "https://global.api.konghq.com"
+    KONNECT_REGION = os.environ.get("KONNECT_REGION", "au")
+    PUSHGATEWAY    = os.environ.get("PUSHGATEWAY_URL",
+                         "http://prometheus-pushgateway.observability.svc.cluster.local:9091")
+    KONNECT_API    = f"https://{KONNECT_REGION}.api.konghq.com"
     JOB_NAME       = "kong_konnect"
+    PAGE_SIZE      = 500   # max records per page
 
-    def konnect_query(payload):
-        """POST to Konnect Analytics API and return parsed JSON."""
-        url = f"{KONNECT_API}/v2/analytics/requests"
+
+    def konnect_fetch_page(time_start, time_end, offset=None):
+        """Fetch one page of raw request logs from the Konnect API."""
+        url = f"{KONNECT_API}/v2/api-requests"
+        payload = {
+            "time_range": {
+                "type": "absolute",
+                "start": time_start,
+                "end":   time_end,
+            },
+            "size": PAGE_SIZE,
+        }
+        if offset:
+            payload["offset"] = offset
+
         data = json.dumps(payload).encode()
         req = urllib.request.Request(
             url,
             data=data,
             headers={
                 "Authorization": f"Bearer {KONNECT_TOKEN}",
-                "Content-Type": "application/json",
+                "Content-Type":  "application/json",
             },
             method="POST",
         )
@@ -71,55 +90,136 @@ data:
             print(f"[ERROR] Konnect API request failed: {e}", file=sys.stderr)
             return None
 
-    def build_metrics_text(results):
-        """Convert Konnect analytics results to Prometheus text format."""
-        lines = []
 
-        # Metadata headers
-        lines.append("# HELP kong_konnect_requests_total Total requests through Kong in the last minute")
-        lines.append("# TYPE kong_konnect_requests_total gauge")
-        lines.append("# HELP kong_konnect_4xx_total 4xx responses through Kong in the last minute")
-        lines.append("# TYPE kong_konnect_4xx_total gauge")
-        lines.append("# HELP kong_konnect_5xx_total 5xx responses through Kong in the last minute")
-        lines.append("# TYPE kong_konnect_5xx_total gauge")
-        lines.append("# HELP kong_konnect_request_latency_ms_p99 P99 end-to-end latency in milliseconds")
-        lines.append("# TYPE kong_konnect_request_latency_ms_p99 gauge")
-        lines.append("# HELP kong_konnect_upstream_latency_ms_p99 P99 upstream latency in milliseconds")
-        lines.append("# TYPE kong_konnect_upstream_latency_ms_p99 gauge")
+    def fetch_all_records(time_start, time_end):
+        """
+        Paginate through all request log records for the time window.
+        Filters to our control plane ID in Python because the server-side
+        filter parameter returns 400 on this endpoint.
+        Returns list of filtered records, or None on API error.
+        """
+        records = []
+        offset  = None
+        page    = 0
+        while True:
+            page += 1
+            resp = konnect_fetch_page(time_start, time_end, offset)
+            if resp is None:
+                return None
 
-        if not results:
-            # Emit zeros so Grafana shows the series even when there's no traffic
-            cp = KONNECT_CP_ID
+            batch = resp.get("results", [])
+            our_batch = [r for r in batch if r.get("control_plane") == KONNECT_CP_ID]
+            records.extend(our_batch)
+            print(f"[INFO] Page {page}: {len(batch)} records total, "
+                  f"{len(our_batch)} matched CP {KONNECT_CP_ID}")
+
+            # Paginate via meta.next cursor
+            meta        = resp.get("meta", {})
+            next_offset = meta.get("next") or meta.get("after")
+            if not next_offset or len(batch) < PAGE_SIZE:
+                break
+            offset = next_offset
+            if page >= 20:
+                print("[WARN] Reached page limit (20), stopping pagination",
+                      file=sys.stderr)
+                break
+
+        return records
+
+
+    def p99(values):
+        """Compute the 99th percentile of a list (returns 0 for empty list)."""
+        if not values:
+            return 0
+        sv  = sorted(values)
+        idx = max(0, int(len(sv) * 0.99) - 1)
+        return sv[idx]
+
+
+    def aggregate(records):
+        """
+        Group raw request records by (service, route) and compute:
+          requests, c4xx, c5xx, latencies_response[], latencies_upstream[]
+        """
+        groups = {}
+        for r in records:
+            svc   = r.get("gateway_service") or "unknown"
+            route = r.get("route")           or "unknown"
+            key   = (svc, route)
+            if key not in groups:
+                groups[key] = {
+                    "requests":           0,
+                    "c4xx":               0,
+                    "c5xx":               0,
+                    "latencies_response": [],
+                    "latencies_upstream": [],
+                }
+            g = groups[key]
+            g["requests"] += 1
+
+            status = str(r.get("response_http_status", ""))
+            if status.startswith("4"):
+                g["c4xx"] += 1
+            elif status.startswith("5"):
+                g["c5xx"] += 1
+
+            lat = r.get("latencies_response_ms")
+            if lat is not None:
+                g["latencies_response"].append(lat)
+
+            up = r.get("latencies_upstream_ms")
+            if up is not None:
+                g["latencies_upstream"].append(up)
+
+        return groups
+
+
+    def build_metrics_text(groups):
+        """Render aggregated groups as Prometheus text exposition format."""
+        cp    = KONNECT_CP_ID
+        lines = [
+            "# HELP kong_konnect_requests_total Total requests through Kong in the last 2 minutes",
+            "# TYPE kong_konnect_requests_total gauge",
+            "# HELP kong_konnect_4xx_total 4xx responses through Kong in the last 2 minutes",
+            "# TYPE kong_konnect_4xx_total gauge",
+            "# HELP kong_konnect_5xx_total 5xx responses through Kong in the last 2 minutes",
+            "# TYPE kong_konnect_5xx_total gauge",
+            "# HELP kong_konnect_request_latency_ms_p99 P99 end-to-end latency in milliseconds",
+            "# TYPE kong_konnect_request_latency_ms_p99 gauge",
+            "# HELP kong_konnect_upstream_latency_ms_p99 P99 upstream latency in milliseconds",
+            "# TYPE kong_konnect_upstream_latency_ms_p99 gauge",
+        ]
+
+        if not groups:
+            # Emit zeros so Grafana keeps the series alive during quiet periods
             for metric in ["requests_total", "4xx_total", "5xx_total",
                            "request_latency_ms_p99", "upstream_latency_ms_p99"]:
-                lines.append(f'kong_konnect_{metric}{{control_plane="{cp}",service="all"}} 0')
+                lines.append(
+                    f'kong_konnect_{metric}{{control_plane="{cp}",'
+                    f'service="all",route="all"}} 0'
+                )
             return "\n".join(lines) + "\n"
 
-        for entry in results.get("data", []):
-            svc   = entry.get("service_name") or entry.get("service_id", "unknown")
-            route = entry.get("route_name")   or entry.get("route_id", "unknown")
-            cp    = KONNECT_CP_ID
-            labels = f'control_plane="{cp}",service="{svc}",route="{route}"'
-
-            total    = entry.get("request_count", 0)
-            c4xx     = entry.get("4xx_count", 0)
-            c5xx     = entry.get("5xx_count", 0)
-            lat_p99  = entry.get("p99_latency_ms", 0)
-            up_p99   = entry.get("p99_upstream_latency_ms", 0)
-
-            lines.append(f"kong_konnect_requests_total{{{labels}}} {total}")
-            lines.append(f"kong_konnect_4xx_total{{{labels}}} {c4xx}")
-            lines.append(f"kong_konnect_5xx_total{{{labels}}} {c5xx}")
+        for (svc, route), g in groups.items():
+            labels = (f'control_plane="{cp}",'
+                      f'service="{svc}",'
+                      f'route="{route}"')
+            lat_p99 = p99(g["latencies_response"])
+            up_p99  = p99(g["latencies_upstream"])
+            lines.append(f"kong_konnect_requests_total{{{labels}}} {g['requests']}")
+            lines.append(f"kong_konnect_4xx_total{{{labels}}} {g['c4xx']}")
+            lines.append(f"kong_konnect_5xx_total{{{labels}}} {g['c5xx']}")
             lines.append(f"kong_konnect_request_latency_ms_p99{{{labels}}} {lat_p99}")
             lines.append(f"kong_konnect_upstream_latency_ms_p99{{{labels}}} {up_p99}")
 
         return "\n".join(lines) + "\n"
 
+
     def push_to_gateway(metrics_text):
         """PUT metrics to Pushgateway using the text exposition format."""
-        url = f"{PUSHGATEWAY}/metrics/job/{JOB_NAME}"
+        url  = f"{PUSHGATEWAY}/metrics/job/{JOB_NAME}"
         data = metrics_text.encode()
-        req = urllib.request.Request(
+        req  = urllib.request.Request(
             url,
             data=data,
             headers={"Content-Type": "text/plain; version=0.0.4"},
@@ -132,34 +232,30 @@ data:
             print(f"[ERROR] Push failed: {e}", file=sys.stderr)
             sys.exit(1)
 
+
     def main():
-        now   = datetime.now(timezone.utc)
-        start = now - timedelta(minutes=2)  # 2-min window for eventual consistency
+        now        = datetime.now(timezone.utc)
+        start      = now - timedelta(minutes=2)   # 2-min window for eventual consistency
+        time_start = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        time_end   = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        payload = {
-            "filters": {
-                "control_plane_ids": [KONNECT_CP_ID],
-            },
-            "granularity": "minutely",
-            "time_range": {
-                "type": "absolute",
-                "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "end":   now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            },
-            "metrics": [
-                "request_count",
-                "response_latency_p99",
-                "upstream_latency_p99",
-            ],
-            "dimensions": ["service", "route"],
-        }
+        print(f"[INFO] Querying {KONNECT_API}/v2/api-requests "
+              f"{time_start} -> {time_end}")
+        records = fetch_all_records(time_start, time_end)
 
-        print(f"[INFO] Querying Konnect Analytics: {start.isoformat()} → {now.isoformat()}")
-        result = konnect_query(payload)
+        if records is None:
+            print("[WARN] API error — pushing zeros so Grafana retains the series",
+                  file=sys.stderr)
+            groups = {}
+        else:
+            print(f"[INFO] {len(records)} records matched CP {KONNECT_CP_ID}")
+            groups = aggregate(records)
+            print(f"[INFO] Aggregated into {len(groups)} service/route groups")
 
-        metrics_text = build_metrics_text(result)
+        metrics_text = build_metrics_text(groups)
         print(f"[INFO] Pushing {len(metrics_text)} bytes to Pushgateway")
         push_to_gateway(metrics_text)
+
 
     if __name__ == "__main__":
         main()
@@ -173,7 +269,7 @@ metadata:
   labels:
     app: konnect-analytics-exporter
 spec:
-  # Run every minute — matches Konnect Analytics 'minutely' granularity
+  # Run every minute — aligns with the 2-minute fetch window
   schedule: "* * * * *"
   concurrencyPolicy: Forbid        # Skip if previous run is still going
   successfulJobsHistoryLimit: 3
@@ -211,6 +307,8 @@ spec:
                     secretKeyRef:
                       name: konnect-token
                       key: cp_id
+                - name: KONNECT_REGION
+                  value: "au"      # Konnect API region — match your Konnect account region
                 - name: PUSHGATEWAY_URL
                   value: "http://prometheus-pushgateway.observability.svc.cluster.local:9091"
               volumeMounts:
