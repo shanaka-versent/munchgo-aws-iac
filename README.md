@@ -321,6 +321,27 @@ The VPC CNI NetworkPolicy controller is enabled via Terraform (`terraform/module
 
 Because the VPC CNI NetworkPolicy controller evaluates traffic at the pod's veth interface using the original source pod IP (preserved through HBONE tunnelling), namespace-based NetworkPolicy selectors work correctly alongside Istio Ambient Mesh. No special configuration is needed to make the two systems co-operate.
 
+#### Verification
+
+> **Note:** In VPC CNI v1.14+ the policy enforcement agent (`aws-eks-nodeagent`) runs as a **sidecar container inside `aws-node`** — there is no separate `aws-network-policy-agent` DaemonSet. Look for `2/2 READY` on all nodes, not a standalone DaemonSet.
+
+```bash
+# 1. Confirm enforcement agent is running on every node (look for 2/2 READY)
+kubectl get pods -n kube-system -l k8s-app=aws-node
+
+# 2. Confirm aws-eks-nodeagent container is healthy on each node
+kubectl get pods -n kube-system -l k8s-app=aws-node \
+  -o jsonpath='{range .items[*]}{.metadata.name}{" — nodeagent="}{.status.containerStatuses[?(@.name=="aws-eks-nodeagent")].state.running.startedAt}{"\n"}{end}'
+
+# 3. Confirm NetworkPolicies are applied by ArgoCD
+kubectl get networkpolicies -n munchgo
+kubectl get networkpolicies -n istio-ingress
+
+# 4. Confirm the EKS addon has enableNetworkPolicy active
+kubectl get configmap -n kube-system amazon-vpc-cni \
+  -o jsonpath='{.data.enable-network-policy}'
+```
+
 ---
 
 ## MunchGo Microservices
