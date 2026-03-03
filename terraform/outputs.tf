@@ -222,21 +222,35 @@ output "github_oidc_provider_arn" {
 }
 
 # ==============================================================================
-# KONG CLOUD GATEWAY SETUP
+# KONG KONNECT (Terraform IaC)
 # ==============================================================================
 
+output "konnect_control_plane_id" {
+  description = "Kong Konnect Control Plane ID (auto-read by 03-post-terraform-setup.sh)"
+  value       = length(konnect_gateway_control_plane.munchgo) > 0 ? konnect_gateway_control_plane.munchgo[0].id : ""
+}
+
+output "konnect_network_id" {
+  description = "Kong Cloud Gateway Network ID"
+  value       = length(konnect_cloud_gateway_network.munchgo) > 0 ? konnect_cloud_gateway_network.munchgo[0].id : ""
+}
+
 output "kong_cloud_gateway_setup_command" {
-  description = "Command to set up Kong Cloud Gateway with Transit Gateway"
+  description = "Kong Konnect setup is now managed by Terraform (konnect.tf). TGW attachment requires a second apply after network is ready (~30 min)."
   value       = <<-EOT
-    # 1. Ensure .env has KONNECT_REGION and KONNECT_TOKEN set
-    #    (Transit Gateway values are auto-read from Terraform outputs)
-
-    # 2. Run the setup script:
-    ./scripts/02-setup-cloud-gateway.sh
-
-    # Auto-populated from Terraform:
-    #   TRANSIT_GATEWAY_ID = ${aws_ec2_transit_gateway.kong.id}
-    #   RAM_SHARE_ARN      = ${aws_ram_resource_share.kong_tgw.arn}
-    #   EKS_VPC_CIDR       = ${module.vpc.vpc_cidr}
+    # Konnect resources (control plane, network, data plane group) are created
+    # automatically by 'terraform apply' when konnect_token is set.
+    #
+    # Pass 1 (runs with main terraform apply):
+    #   - konnect_gateway_control_plane.munchgo
+    #   - konnect_cloud_gateway_network.munchgo
+    #   - konnect_cloud_gateway_configuration.munchgo
+    #
+    # Pass 2 (after network reaches 'ready' state ~30 min):
+    #   terraform apply -target=konnect_cloud_gateway_transit_gateway.eks
+    #
+    # Control Plane ID: ${length(konnect_gateway_control_plane.munchgo) > 0 ? konnect_gateway_control_plane.munchgo[0].id : "not yet created"}
+    # Transit Gateway:  ${aws_ec2_transit_gateway.kong.id}
+    # RAM Share:        ${aws_ram_resource_share.kong_tgw.arn}
   EOT
 }

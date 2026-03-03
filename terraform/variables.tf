@@ -346,6 +346,36 @@ variable "kong_cloud_gateway_cidr" {
   default     = "192.168.0.0/16"
 }
 
+# ==============================================================================
+# KONG KONNECT (IaC — Terraform Konnect Provider)
+# ==============================================================================
+# These variables drive terraform/konnect.tf which manages the Konnect Dedicated
+# Cloud Gateway declaratively. If konnect_token is empty, all Konnect resources
+# are skipped and scripts/02-setup-cloud-gateway.sh can be used instead.
+#
+# Token source (in priority order):
+#   CI/CD   — TF_VAR_konnect_token (set from KONNECT_TOKEN GitHub secret)
+#   Local   — TF_VAR_konnect_token sourced from .env, or terraform.tfvars
+
+variable "konnect_token" {
+  description = "Kong Konnect Personal Access Token (kpat_...). Set via TF_VAR_konnect_token."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "konnect_region" {
+  description = "Konnect region for the control plane geo (us, eu, au)"
+  type        = string
+  default     = "au"
+}
+
+variable "konnect_control_plane_name" {
+  description = "Name of the Konnect control plane to create"
+  type        = string
+  default     = "MunchGo"
+}
+
 # Tags
 variable "tags" {
   description = "Tags for all resources"

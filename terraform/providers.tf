@@ -25,6 +25,10 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.25"
     }
+    konnect = {
+      source  = "kong/konnect"
+      version = "~> 2.3"
+    }
   }
 }
 
@@ -60,6 +64,14 @@ provider "kubernetes" {
     command     = "aws"
     args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.region, "--profile", var.aws_profile]
   }
+}
+
+# Kong Konnect provider
+# Token comes from var.konnect_token (set via TF_VAR_konnect_token or terraform.tfvars).
+# Only used when konnect_token is provided — Konnect resources are skipped if empty.
+provider "konnect" {
+  personal_access_token = var.konnect_token
+  server_url            = "https://global.api.konghq.com"
 }
 
 # Helm provider - configured after EKS cluster is created

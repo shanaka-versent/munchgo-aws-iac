@@ -581,11 +581,18 @@ GitHub Actions authenticates via OIDC federation — no stored AWS credentials.
 | `AZURE_SUBSCRIPTION_ID` | Secret | Azure subscription ID (optional) | ACR sync via OIDC |
 | `AZURE_ACR_NAME` | Variable | ACR name, e.g. `munchgoacr` (optional) | Conditional ACR sync |
 
-**`munchgo-aws-iac` repo** (required for post-deployment tests):
+**`munchgo-aws-iac` repo** (required for post-deployment tests and Terraform Konnect IaC):
 
 | Secret | Value | Used By |
 |--------|-------|---------|
-| `KONNECT_TOKEN` | Konnect Personal Access Token | `deck gateway sync` (on `deck/kong.yaml` push) |
+| `KONNECT_TOKEN` | Konnect Personal Access Token | `deck gateway sync` (on `deck/kong.yaml` push) · `TF_VAR_konnect_token` in Terraform CI runs |
+
+When running `terraform apply` in CI, expose the token as:
+```yaml
+env:
+  TF_VAR_konnect_token: ${{ secrets.KONNECT_TOKEN }}
+```
+This creates the Konnect control plane, network, and data plane group declaratively — no separate scripts or manual steps.
 
 The IAM role `role-spa-deploy-kong-gw-poc` is created by Terraform (`terraform/modules/iam/github_oidc.tf`). It trusts both `munchgo-spa` and `munchgo-microservices` repos via GitHub OIDC federation.
 
@@ -844,16 +851,25 @@ KONNECT_TOKEN="kpat_your_token_here"  # from cloud.konghq.com → Settings → P
 KONNECT_CONTROL_PLANE_NAME="MunchGo"
 ```
 
-> `.env` is **gitignored** — your token never gets committed. All scripts auto-source it. The `KONNECT_CP_ID` is resolved and written to `.env` automatically by the setup scripts.
+> `.env` is **gitignored** — your token never gets committed. All scripts auto-source it. The `KONNECT_CP_ID` is resolved and written automatically from Terraform state.
 
-### Step 2: Deploy Infrastructure + GitOps
+**Token in CI/CD:** The same `KONNECT_TOKEN` GitHub Actions secret is used by both the `deck gateway sync` workflow and Terraform (`TF_VAR_konnect_token`). No separate secrets needed.
+
+### Step 2: Deploy Infrastructure + GitOps + Konnect
 
 ```bash
+# Pass KONNECT_TOKEN so Terraform creates the Konnect control plane + network + data plane group
+export TF_VAR_konnect_token="$(grep KONNECT_TOKEN .env | cut -d'"' -f2)"
+export TF_VAR_konnect_region="au"
+
 terraform -chdir=terraform init
 terraform -chdir=terraform apply
 ```
 
-Creates Layers 1-3 in one shot: VPC, EKS cluster + node groups, AWS LB Controller, Transit Gateway + RAM share, ECR (6 repos), MSK (Kafka), RDS (PostgreSQL), S3 (SPA bucket), Amazon Cognito (User Pool, App Client, Groups, Pre Token Lambda, Secrets Manager), ArgoCD + root application (App of Apps bootstrapped automatically).
+Creates **all layers in one shot:**
+- **AWS infrastructure:** VPC, EKS cluster + node groups, AWS LB Controller, Transit Gateway + RAM share, ECR (6 repos), MSK (Kafka), RDS (PostgreSQL), S3 (SPA bucket), Amazon Cognito (User Pool, App Client, Groups, Pre Token Lambda, Secrets Manager)
+- **Kong Konnect (IaC):** Control plane `MunchGo`, Cloud Gateway Network, Data Plane Group — all via the `kong/konnect` Terraform provider (`terraform/konnect.tf`). The CP ID is written to Terraform state and surfaced as `terraform output konnect_control_plane_id`.
+- **GitOps:** ArgoCD + root application (App of Apps bootstrapped automatically)
 
 ArgoCD immediately begins syncing all Layer 3 child apps via sync waves. The `09-munchgo-apps.yaml` bridge (wave 8) discovers Layer 4 service Applications from the `munchgo-k8s-config` GitOps repo.
 
@@ -876,17 +892,21 @@ aws eks update-kubeconfig \
 
 Generates a self-signed CA + server certificate and creates the `istio-gateway-tls` Kubernetes secret automatically.
 
-### Step 5: Set Up Kong Cloud Gateway
+### Step 5: Attach Transit Gateway (after network is ready)
+
+The Kong Cloud Gateway Network created by `terraform apply` takes **~30 minutes** to reach `ready` state. Once ready, attach the Transit Gateway:
 
 ```bash
-./scripts/02-setup-cloud-gateway.sh
+# Option A (recommended): Terraform IaC — declarative, idempotent
+terraform -chdir=terraform apply -target=konnect_cloud_gateway_transit_gateway.eks
+
+# Option B: script fallback — only needed if Terraform Konnect provider is unavailable
+./scripts/02-setup-cloud-gateway.sh --tgw-only
 ```
 
-Fully automates Konnect and AWS setup:
-1. Creates Konnect control plane **`MunchGo`** (`cloud_gateway: true`)
-2. Provisions Cloud Gateway network `munchgo-eks-network` (~30 minutes)
-3. Shares Transit Gateway via AWS RAM and auto-accepts TGW attachment
-4. **Writes `KONNECT_CP_ID` to `.env`** automatically — no manual ID lookup needed
+This connects Kong's managed AWS VPC (`192.168.0.0/16`) to your EKS VPC via Transit Gateway. AWS RAM auto-accepts the attachment (enabled in Terraform). No manual AWS Console steps.
+
+> **`KONNECT_CP_ID` is zero-touch** — Terraform writes it to state during `terraform apply`. `03-post-terraform-setup.sh` reads it from `terraform output konnect_control_plane_id` automatically.
 
 ### Step 6: Populate Config Placeholders
 
@@ -1209,6 +1229,9 @@ After teardown, re-running the deployment steps creates a fresh environment. The
 | `kong_cloud_gateway_domain` | `""` | Kong proxy domain (from Konnect) |
 | `enable_waf` | `true` | WAF Web ACL |
 | `waf_rate_limit` | `2000` | Requests per 5 min per IP |
+| `konnect_token` | `""` | Konnect PAT — set via `TF_VAR_konnect_token` (sensitive, never hardcode). When set, Terraform creates the control plane, network and data plane group via the `kong/konnect` provider. |
+| `konnect_region` | `au` | Konnect control plane geo (`us`, `eu`, `au`) |
+| `konnect_control_plane_name` | `MunchGo` | Name of the Konnect control plane to create |
 
 ---
 

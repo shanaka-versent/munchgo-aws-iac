@@ -401,23 +401,47 @@ update_insomnia_url() {
 }
 
 # ---------------------------------------------------------------------------
-# Auto-resolve the Konnect control-plane ID from the API
+# Auto-resolve the Konnect control-plane ID
 # ---------------------------------------------------------------------------
 # Priority:
 #   1. KONNECT_CP_ID already set in environment / .env
-#   2. Query Konnect API by KONNECT_CONTROL_PLANE_NAME (auto-lookup)
-#   3. Persist the resolved ID back to .env for future runs
+#   2. Terraform output konnect_control_plane_id (IaC path — zero manual steps)
+#   3. Query Konnect API by KONNECT_CONTROL_PLANE_NAME (fallback)
+#   4. Persist the resolved ID back to .env for future runs
 #
-# This means zero manual steps — 02-setup-cloud-gateway.sh writes the ID to
-# .env on first run, and this function handles the fallback for any case where
-# .env was reset or the platform was destroyed and recreated.
+# With the Terraform Konnect provider (terraform/konnect.tf), the CP ID is
+# written to Terraform state on every 'terraform apply' and is always current —
+# even after platform destroy/recreate. No manual entry ever needed.
 # ---------------------------------------------------------------------------
 get_konnect_cp_id() {
+    # Priority 1: already in environment / .env
     if [[ -n "${KONNECT_CP_ID:-}" ]]; then
         info "  Konnect CP ID (from env): ${KONNECT_CP_ID}"
         return
     fi
 
+    # Priority 2: read from Terraform output (IaC path)
+    if [[ -d "$TERRAFORM_DIR/.terraform" ]]; then
+        local TF_CP_ID
+        TF_CP_ID=$(terraform -chdir="$TERRAFORM_DIR" output -raw konnect_control_plane_id 2>/dev/null || echo "")
+        if [[ -n "$TF_CP_ID" && "$TF_CP_ID" != "null" ]]; then
+            KONNECT_CP_ID="$TF_CP_ID"
+            info "  Konnect CP ID (from terraform output): ${KONNECT_CP_ID}"
+            # Persist so subsequent runs skip the Terraform call
+            if [[ -f "$ENV_FILE" ]]; then
+                if grep -q "^KONNECT_CP_ID=" "$ENV_FILE" 2>/dev/null; then
+                    sed -i.bak "s|^KONNECT_CP_ID=.*|KONNECT_CP_ID=\"${KONNECT_CP_ID}\"|" "$ENV_FILE"
+                    rm -f "${ENV_FILE}.bak"
+                else
+                    echo "KONNECT_CP_ID=\"${KONNECT_CP_ID}\"" >> "$ENV_FILE"
+                fi
+                info "  Persisted KONNECT_CP_ID to .env"
+            fi
+            return
+        fi
+    fi
+
+    # Priority 3: fallback — query Konnect API by control-plane name
     if [[ -z "${KONNECT_TOKEN:-}" ]]; then
         warn "KONNECT_TOKEN not set — cannot look up CP ID, skipping Kong monitoring setup"
         return
@@ -426,7 +450,7 @@ get_konnect_cp_id() {
     local CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-MunchGo}"
     local REGION="${KONNECT_REGION:-au}"
 
-    log "Looking up Konnect CP ID for control plane '${CP_NAME}'..."
+    log "Looking up Konnect CP ID for control plane '${CP_NAME}' via API..."
 
     local RESPONSE
     RESPONSE=$(curl -s \
@@ -446,7 +470,7 @@ except Exception:
 
     if [[ -z "${KONNECT_CP_ID:-}" ]]; then
         warn "  Could not find control plane '${CP_NAME}' in Konnect"
-        warn "  Ensure 02-setup-cloud-gateway.sh has been run, then re-run this script"
+        warn "  Run 'terraform apply' with konnect_token set, or run 02-setup-cloud-gateway.sh"
         return
     fi
 

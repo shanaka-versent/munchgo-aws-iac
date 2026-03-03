@@ -1,23 +1,27 @@
 #!/bin/bash
-# Setup Kong Konnect Dedicated Cloud Gateway
+# Setup Kong Konnect Dedicated Cloud Gateway (fallback / TGW-only mode)
 # @author Shanaka Jayasundera - shanakaj@gmail.com
 #
-# Creates a Konnect control plane with Dedicated Cloud Gateway,
-# provisions the cloud gateway network, and configures Transit Gateway
-# attachment for private connectivity to EKS backend services.
+# NOTE: Kong Konnect is now managed as Terraform IaC (terraform/konnect.tf).
+# 'terraform apply' handles: control plane, network, data plane group,
+# and Transit Gateway attachment automatically using the kong/konnect provider.
 #
-# Prerequisites:
-#   1. A Konnect Personal Access Token (kpat_xxx)
-#   2. EKS cluster deployed with Terraform (for VPC ID, Transit Gateway ID)
-#   3. AWS Transit Gateway shared via RAM with Kong's account
+# This script serves two purposes:
+#   1. FALLBACK — if Terraform Konnect provider is not available, this script
+#      creates all resources via the Konnect REST API directly.
+#   2. TGW ATTACHMENT ONLY — skip Steps 1-3 (--tgw-only flag) and only run
+#      the Transit Gateway attachment once the network reaches 'ready' state.
+#      This is equivalent to:
+#        terraform apply -target=konnect_cloud_gateway_transit_gateway.eks
 #
-# Usage:
-#   export KONNECT_REGION="au"
-#   export KONNECT_TOKEN="kpat_xxx..."
-#   export TRANSIT_GATEWAY_ID="tgw-xxxxxxxxx"      # From terraform output
-#   export RAM_SHARE_ARN="arn:aws:ram:..."          # From terraform output
-#   export EKS_VPC_CIDR="10.0.0.0/16"              # Your VPC CIDR
-#   ./scripts/01-setup-cloud-gateway.sh
+# For the recommended IaC approach, see terraform/konnect.tf.
+# Token is read from .env (KONNECT_TOKEN) — same source as TF_VAR_konnect_token.
+#
+# Usage (full setup — fallback):
+#   ./scripts/02-setup-cloud-gateway.sh
+#
+# Usage (TGW attachment only — after network is ready):
+#   ./scripts/02-setup-cloud-gateway.sh --tgw-only
 
 set -euo pipefail
 
@@ -436,19 +440,56 @@ show_next_steps() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
+    local TGW_ONLY=false
+    for arg in "$@"; do
+        [[ "$arg" == "--tgw-only" ]] && TGW_ONLY=true
+    done
+
     echo ""
     echo "=============================================="
     echo "  Kong Konnect Dedicated Cloud Gateway Setup"
+    if $TGW_ONLY; then
+        echo "  Mode: TGW Attachment Only"
+    else
+        echo "  Mode: Full Setup (IaC fallback)"
+        echo "  NOTE: Prefer 'terraform apply' (terraform/konnect.tf)"
+    fi
     echo "=============================================="
     echo ""
 
     populate_from_terraform
     validate_env
-    create_control_plane
-    create_network
-    create_dp_group
-    share_ram_with_kong
-    attach_transit_gateway
+
+    if $TGW_ONLY; then
+        # Network and CP already exist (created by Terraform or prior run)
+        # Just resolve CONTROL_PLANE_ID and NETWORK_ID then attach TGW.
+        log "TGW-only mode: looking up existing control plane and network..."
+
+        CONTROL_PLANE_ID="${KONNECT_CP_ID:-}"
+        if [[ -z "$CONTROL_PLANE_ID" ]]; then
+            CONTROL_PLANE_ID=$(curl -s \
+                "https://${KONNECT_REGION}.api.konghq.com/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
+                -H "Authorization: Bearer $KONNECT_TOKEN" \
+                | jq -r ".data[] | select(.name == \"${CP_NAME}\") | .id" | head -1)
+        fi
+        NETWORK_ID=$(curl -s \
+            "https://global.api.konghq.com/v2/cloud-gateways/networks" \
+            -H "Authorization: Bearer $KONNECT_TOKEN" \
+            | jq -r ".data[] | select(.name == \"munchgo-eks-network\") | .id" | head -1)
+
+        log "  Control Plane ID: ${CONTROL_PLANE_ID:-NOT FOUND}"
+        log "  Network ID:       ${NETWORK_ID:-NOT FOUND}"
+
+        share_ram_with_kong
+        attach_transit_gateway
+    else
+        create_control_plane
+        create_network
+        create_dp_group
+        share_ram_with_kong
+        attach_transit_gateway
+    fi
+
     show_next_steps
 }
 
