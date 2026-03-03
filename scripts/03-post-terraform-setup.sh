@@ -401,27 +401,84 @@ update_insomnia_url() {
 }
 
 # ---------------------------------------------------------------------------
+# Auto-resolve the Konnect control-plane ID from the API
+# ---------------------------------------------------------------------------
+# Priority:
+#   1. KONNECT_CP_ID already set in environment / .env
+#   2. Query Konnect API by KONNECT_CONTROL_PLANE_NAME (auto-lookup)
+#   3. Persist the resolved ID back to .env for future runs
+#
+# This means zero manual steps — 02-setup-cloud-gateway.sh writes the ID to
+# .env on first run, and this function handles the fallback for any case where
+# .env was reset or the platform was destroyed and recreated.
+# ---------------------------------------------------------------------------
+get_konnect_cp_id() {
+    if [[ -n "${KONNECT_CP_ID:-}" ]]; then
+        info "  Konnect CP ID (from env): ${KONNECT_CP_ID}"
+        return
+    fi
+
+    if [[ -z "${KONNECT_TOKEN:-}" ]]; then
+        warn "KONNECT_TOKEN not set — cannot look up CP ID, skipping Kong monitoring setup"
+        return
+    fi
+
+    local CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-MunchGo}"
+    local REGION="${KONNECT_REGION:-au}"
+
+    log "Looking up Konnect CP ID for control plane '${CP_NAME}'..."
+
+    local RESPONSE
+    RESPONSE=$(curl -s \
+        "https://${REGION}.api.konghq.com/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
+        -H "Authorization: Bearer ${KONNECT_TOKEN}" 2>/dev/null || echo "{}")
+
+    KONNECT_CP_ID=$(echo "$RESPONSE" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    items = data.get('data', [])
+    match = next((x for x in items if x.get('name') == '${CP_NAME}'), None)
+    print(match['id'] if match else '')
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+
+    if [[ -z "${KONNECT_CP_ID:-}" ]]; then
+        warn "  Could not find control plane '${CP_NAME}' in Konnect"
+        warn "  Ensure 02-setup-cloud-gateway.sh has been run, then re-run this script"
+        return
+    fi
+
+    info "  Konnect CP ID (resolved from API): ${KONNECT_CP_ID}"
+
+    # Persist to .env so subsequent runs skip the API call
+    if [[ -f "$ENV_FILE" ]]; then
+        if grep -q "^KONNECT_CP_ID=" "$ENV_FILE" 2>/dev/null; then
+            sed -i.bak "s|^KONNECT_CP_ID=.*|KONNECT_CP_ID=\"${KONNECT_CP_ID}\"|" "$ENV_FILE"
+            rm -f "${ENV_FILE}.bak"
+        else
+            echo "KONNECT_CP_ID=\"${KONNECT_CP_ID}\"" >> "$ENV_FILE"
+        fi
+        info "  Persisted KONNECT_CP_ID to .env"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Create Konnect token K8s secret for the analytics exporter CronJob
 # ---------------------------------------------------------------------------
 # The konnect-analytics-exporter CronJob reads KONNECT_TOKEN and KONNECT_CP_ID
 # from this secret to authenticate with the Konnect Analytics API.
-#
-# KONNECT_TOKEN  — set in .env (same token used by decK sync)
-# KONNECT_CP_ID  — the control-plane UUID from Konnect UI:
-#                  Gateway Manager → your control plane → Settings → ID
-#                  Set KONNECT_CP_ID in .env to enable this step.
+# KONNECT_CP_ID is resolved automatically by get_konnect_cp_id() above.
 # ---------------------------------------------------------------------------
 create_konnect_token_secret() {
     if [[ -z "${KONNECT_TOKEN:-}" ]]; then
         warn "KONNECT_TOKEN not set — skipping konnect-token secret creation"
-        warn "Set KONNECT_TOKEN and KONNECT_CP_ID in .env and re-run to enable Kong monitoring"
         return
     fi
 
     if [[ -z "${KONNECT_CP_ID:-}" ]]; then
-        warn "KONNECT_CP_ID not set — skipping konnect-token secret creation"
-        warn "Find KONNECT_CP_ID in Konnect UI: Gateway Manager → control plane → Settings → ID"
-        warn "Add KONNECT_CP_ID=<uuid> to .env and re-run to enable Kong monitoring"
+        warn "KONNECT_CP_ID could not be resolved — skipping konnect-token secret creation"
         return
     fi
 
@@ -431,7 +488,7 @@ create_konnect_token_secret() {
         --from-literal=cp_id="${KONNECT_CP_ID}" \
         -n observability \
         --dry-run=client -o yaml | kubectl apply -f -
-    info "  konnect-token secret created (token + cp_id)"
+    info "  konnect-token secret created (token + cp_id=${KONNECT_CP_ID})"
 }
 
 # ---------------------------------------------------------------------------
@@ -496,6 +553,7 @@ main() {
     create_service_databases
     create_kafka_secret
     sync_kong_config
+    get_konnect_cp_id
     create_konnect_token_secret
     seed_admin_user
     show_next_steps

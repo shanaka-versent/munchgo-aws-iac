@@ -94,6 +94,27 @@ validate_env() {
 }
 
 # ---------------------------------------------------------------------------
+# Persist a key=value pair to .env (update if exists, append if new)
+# ---------------------------------------------------------------------------
+persist_to_env() {
+    local key="$1"
+    local value="$2"
+    local env_file="${SCRIPT_DIR}/../.env"
+
+    if [[ ! -f "$env_file" ]]; then
+        return
+    fi
+
+    if grep -q "^${key}=" "$env_file" 2>/dev/null; then
+        sed -i.bak "s|^${key}=.*|${key}=\"${value}\"|" "$env_file"
+        rm -f "${env_file}.bak"
+    else
+        echo "${key}=\"${value}\"" >> "$env_file"
+    fi
+    info "  Persisted ${key} to .env"
+}
+
+# ---------------------------------------------------------------------------
 # Step 1: Create Control Plane
 # ---------------------------------------------------------------------------
 create_control_plane() {
@@ -101,6 +122,8 @@ create_control_plane() {
 
     if [[ -n "${CONTROL_PLANE_ID:-}" ]]; then
         log "  Using existing control plane: ${CONTROL_PLANE_ID}"
+        # Ensure it's in .env for 03-post-terraform-setup.sh
+        persist_to_env "KONNECT_CP_ID" "${CONTROL_PLANE_ID}"
         return
     fi
 
@@ -128,6 +151,10 @@ create_control_plane() {
     fi
 
     log "  Control Plane ID: ${CONTROL_PLANE_ID}"
+
+    # Write CP ID to .env so 03-post-terraform-setup.sh and subsequent runs
+    # don't need to look it up manually or via API.
+    persist_to_env "KONNECT_CP_ID" "${CONTROL_PLANE_ID}"
 }
 
 # ---------------------------------------------------------------------------
