@@ -6,7 +6,7 @@
 #
 # IMPORTANT: All services point to the SINGLE Istio Gateway internal NLB.
 # Run ./scripts/03-post-terraform-setup.sh to get the NLB DNS name.
-# Replace PLACEHOLDER_NLB_DNS with the actual NLB hostname.
+# Replace k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com with the actual NLB hostname.
 #
 # Architecture:
 #   Kong Cloud GW --[Transit GW]--> Internal NLB --> Istio Gateway --> HTTPRoute --> Pod
@@ -94,7 +94,7 @@ plugins:
 # Kong sends traffic to this NLB with the original path preserved.
 # Istio Gateway uses HTTPRoutes to route to the correct backend pod.
 #
-# Replace PLACEHOLDER_NLB_DNS with the Istio Gateway NLB hostname from:
+# Replace k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com with the Istio Gateway NLB hostname from:
 #   kubectl get gateway -n istio-ingress kong-cloud-gw-gateway \
 #     -o jsonpath='{.status.addresses[0].value}'
 
@@ -106,7 +106,7 @@ services:
   # Auth service proxies to Cognito for user registration and login,
   # then returns Cognito tokens to the client.
   - name: munchgo-auth
-    url: http://PLACEHOLDER_NLB_DNS:80
+    url: http://k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com:80
     protocol: http
     port: 80
     routes:
@@ -147,7 +147,7 @@ services:
   # Consumer Service — Cognito OIDC Protected
   # --------------------------------------------------------------------------
   - name: munchgo-consumers
-    url: http://PLACEHOLDER_NLB_DNS:80
+    url: http://k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com:80
     protocol: http
     port: 80
     routes:
@@ -208,7 +208,7 @@ services:
   # Anonymous consumer allows unauthenticated GET requests (menu browsing).
   # Authenticated requests still get user claims forwarded as headers.
   - name: munchgo-restaurants
-    url: http://PLACEHOLDER_NLB_DNS:80
+    url: http://k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com:80
     protocol: http
     port: 80
     routes:
@@ -268,7 +268,7 @@ services:
   # Order Service — Cognito OIDC Protected (CQRS)
   # --------------------------------------------------------------------------
   - name: munchgo-orders
-    url: http://PLACEHOLDER_NLB_DNS:80
+    url: http://k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com:80
     protocol: http
     port: 80
     routes:
@@ -327,7 +327,7 @@ services:
   # Courier Service — Cognito OIDC Protected
   # --------------------------------------------------------------------------
   - name: munchgo-couriers
-    url: http://PLACEHOLDER_NLB_DNS:80
+    url: http://k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com:80
     protocol: http
     port: 80
     routes:
@@ -388,7 +388,7 @@ services:
   # The SPA creates orders via the saga orchestrator, which coordinates
   # the distributed transaction across consumer, restaurant, and courier services.
   - name: munchgo-sagas
-    url: http://PLACEHOLDER_NLB_DNS:80
+    url: http://k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com:80
     protocol: http
     port: 80
     routes:
@@ -445,7 +445,7 @@ services:
   # Health Check — Platform health endpoint
   # --------------------------------------------------------------------------
   - name: gateway-health
-    url: http://PLACEHOLDER_NLB_DNS:80
+    url: http://k8s-istioing-kongclou-3d422b213d-18118a8344403444.elb.ap-southeast-2.amazonaws.com:80
     protocol: http
     port: 80
     routes:
