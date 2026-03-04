@@ -365,7 +365,7 @@ variable "konnect_token" {
 }
 
 variable "konnect_region" {
-  description = "Konnect region for the control plane geo (us, eu, au)"
+  description = "Konnect region for decK sync and regional API calls (us, eu, au). Note: global API creates CPs in US geo."
   type        = string
   default     = "au"
 }

@@ -22,6 +22,7 @@ resource "aws_ecr_repository" "munchgo" {
 
   name                 = each.value
   image_tag_mutability = "MUTABLE" # Allow :latest tag updates from CI
+  force_delete         = true      # Allow destroy even with images present
 
   image_scanning_configuration {
     scan_on_push = true

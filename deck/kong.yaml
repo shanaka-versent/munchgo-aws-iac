@@ -28,7 +28,7 @@
 #   JWKS auto-discovery (automatic key rotation, no manual key updates).
 #   Validated user claims are forwarded as upstream headers.
 #
-# After Cognito Terraform apply, update PLACEHOLDER_COGNITO_ISSUER_URL with:
+# After Cognito Terraform apply, update https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_hX1PLpjgM with:
 #   terraform output cognito_issuer_url
 #
 # Apply with:
@@ -161,7 +161,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_hX1PLpjgM/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -222,7 +222,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_hX1PLpjgM/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -282,7 +282,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_hX1PLpjgM/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -341,7 +341,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_hX1PLpjgM/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -402,7 +402,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
+          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_hX1PLpjgM/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -474,7 +474,7 @@ consumers:
 # Cognito handles key rotation automatically.
 #
 # After Cognito Terraform apply, update the issuer URLs above:
-#   PLACEHOLDER_COGNITO_ISSUER_URL → https://cognito-idp.<region>.amazonaws.com/<user-pool-id>
+#   https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_hX1PLpjgM → https://cognito-idp.<region>.amazonaws.com/<user-pool-id>
 #
 # Get the value from:
 #   terraform output cognito_issuer_url

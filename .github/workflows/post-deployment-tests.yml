@@ -66,9 +66,10 @@ jobs:
       - name: Sync Kong Gateway config to Konnect
         env:
           KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
+          KONNECT_REGION: ${{ vars.KONNECT_REGION || 'au' }}
         run: |
           deck gateway sync deck/kong.yaml \
-            --konnect-addr https://au.api.konghq.com \
+            --konnect-addr "https://${KONNECT_REGION}.api.konghq.com" \
             --konnect-token "$KONNECT_TOKEN" \
             --konnect-control-plane-name MunchGo
 
