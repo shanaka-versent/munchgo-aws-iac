@@ -6,7 +6,7 @@
 #
 # IMPORTANT: All services point to the SINGLE Istio Gateway internal NLB.
 # Run ./scripts/03-post-terraform-setup.sh to get the NLB DNS name.
-# Replace k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com with the actual NLB hostname.
+# Replace PLACEHOLDER_NLB_DNS with the actual NLB hostname.
 #
 # Architecture:
 #   Kong Cloud GW --[Transit GW]--> Internal NLB --> Istio Gateway --> HTTPRoute --> Pod
@@ -28,7 +28,7 @@
 #   JWKS auto-discovery (automatic key rotation, no manual key updates).
 #   Validated user claims are forwarded as upstream headers.
 #
-# After Cognito Terraform apply, update https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v with:
+# After Cognito Terraform apply, update PLACEHOLDER_COGNITO_ISSUER_URL with:
 #   terraform output cognito_issuer_url
 #
 # Apply with:
@@ -94,7 +94,7 @@ plugins:
 # Kong sends traffic to this NLB with the original path preserved.
 # Istio Gateway uses HTTPRoutes to route to the correct backend pod.
 #
-# Replace k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com with the Istio Gateway NLB hostname from:
+# Replace PLACEHOLDER_NLB_DNS with the Istio Gateway NLB hostname from:
 #   kubectl get gateway -n istio-ingress kong-cloud-gw-gateway \
 #     -o jsonpath='{.status.addresses[0].value}'
 
@@ -106,7 +106,7 @@ services:
   # Auth service proxies to Cognito for user registration and login,
   # then returns Cognito tokens to the client.
   - name: munchgo-auth
-    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    url: http://PLACEHOLDER_NLB_DNS:80
     protocol: http
     port: 80
     routes:
@@ -147,7 +147,7 @@ services:
   # Consumer Service — Cognito OIDC Protected
   # --------------------------------------------------------------------------
   - name: munchgo-consumers
-    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    url: http://PLACEHOLDER_NLB_DNS:80
     protocol: http
     port: 80
     routes:
@@ -161,7 +161,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -208,7 +208,7 @@ services:
   # Anonymous consumer allows unauthenticated GET requests (menu browsing).
   # Authenticated requests still get user claims forwarded as headers.
   - name: munchgo-restaurants
-    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    url: http://PLACEHOLDER_NLB_DNS:80
     protocol: http
     port: 80
     routes:
@@ -222,7 +222,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -268,7 +268,7 @@ services:
   # Order Service — Cognito OIDC Protected (CQRS)
   # --------------------------------------------------------------------------
   - name: munchgo-orders
-    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    url: http://PLACEHOLDER_NLB_DNS:80
     protocol: http
     port: 80
     routes:
@@ -282,7 +282,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -327,7 +327,7 @@ services:
   # Courier Service — Cognito OIDC Protected
   # --------------------------------------------------------------------------
   - name: munchgo-couriers
-    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    url: http://PLACEHOLDER_NLB_DNS:80
     protocol: http
     port: 80
     routes:
@@ -341,7 +341,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -388,7 +388,7 @@ services:
   # The SPA creates orders via the saga orchestrator, which coordinates
   # the distributed transaction across consumer, restaurant, and courier services.
   - name: munchgo-sagas
-    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    url: http://PLACEHOLDER_NLB_DNS:80
     protocol: http
     port: 80
     routes:
@@ -402,7 +402,7 @@ services:
     plugins:
       - name: openid-connect
         config:
-          issuer: https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v/.well-known/openid-configuration
+          issuer: PLACEHOLDER_COGNITO_ISSUER_URL/.well-known/openid-configuration
           auth_methods:
             - bearer
           bearer_token_param_type:
@@ -445,7 +445,7 @@ services:
   # Health Check — Platform health endpoint
   # --------------------------------------------------------------------------
   - name: gateway-health
-    url: http://k8s-istioing-kongclou-3a1d5dfc84-544b8b2eb42eaed2.elb.ap-southeast-2.amazonaws.com:80
+    url: http://PLACEHOLDER_NLB_DNS:80
     protocol: http
     port: 80
     routes:
@@ -474,7 +474,7 @@ consumers:
 # Cognito handles key rotation automatically.
 #
 # After Cognito Terraform apply, update the issuer URLs above:
-#   https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_c6kjJH49v → https://cognito-idp.<region>.amazonaws.com/<user-pool-id>
+#   PLACEHOLDER_COGNITO_ISSUER_URL → https://cognito-idp.<region>.amazonaws.com/<user-pool-id>
 #
 # Get the value from:
 #   terraform output cognito_issuer_url
