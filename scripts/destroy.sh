@@ -516,6 +516,147 @@ delete_konnect_resources() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 5b: Clean up ALL leftover Kong Cloud Gateway networks
+# ---------------------------------------------------------------------------
+# Prevents Konnect network quota exhaustion on next rebuild.
+# Queries all networks in the org and deletes any that remain.
+cleanup_all_kong_networks() {
+    log "Checking for leftover Kong Cloud Gateway networks..."
+
+    if [[ -z "${KONNECT_TOKEN:-}" ]]; then
+        warn "KONNECT_TOKEN not set — cannot clean up leftover networks"
+        return
+    fi
+
+    local auth_header="Authorization: Bearer ${KONNECT_TOKEN}"
+    local networks
+    networks=$(curl -s "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks" -H "$auth_header" 2>/dev/null || echo '{"data":[]}')
+
+    local network_ids
+    network_ids=$(echo "$networks" | jq -r '.data[].id // empty' 2>/dev/null || true)
+
+    if [[ -z "$network_ids" ]]; then
+        log "  No leftover networks found."
+        return
+    fi
+
+    echo "$network_ids" | while read -r net_id; do
+        [[ -z "$net_id" ]] && continue
+        local net_name
+        net_name=$(echo "$networks" | jq -r ".data[] | select(.id == \"$net_id\") | .name" 2>/dev/null || echo "unknown")
+        local net_state
+        net_state=$(echo "$networks" | jq -r ".data[] | select(.id == \"$net_id\") | .state" 2>/dev/null || echo "unknown")
+
+        log "  Found network: ${net_name} (${net_id}) state=${net_state}"
+
+        # Delete TGW attachments first
+        local tgw_list
+        tgw_list=$(curl -s "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${net_id}/transit-gateways" \
+            -H "$auth_header" 2>/dev/null || echo '{"data":[]}')
+        local tgw_ids
+        tgw_ids=$(echo "$tgw_list" | jq -r '.data[].id // empty' 2>/dev/null || true)
+        if [[ -n "$tgw_ids" ]]; then
+            echo "$tgw_ids" | while read -r tgw_id; do
+                [[ -z "$tgw_id" ]] && continue
+                curl -s -X DELETE \
+                    "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${net_id}/transit-gateways/${tgw_id}" \
+                    -H "$auth_header" >/dev/null 2>&1 || true
+                log "  Deleted TGW attachment: ${tgw_id}"
+            done
+        fi
+
+        # Delete the network
+        curl -s -X DELETE "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${net_id}" \
+            -H "$auth_header" >/dev/null 2>&1 || true
+        log "  Deleted network: ${net_name}"
+    done
+
+    log "  Leftover network cleanup complete."
+}
+
+# ---------------------------------------------------------------------------
+# Step 9: Reset deployment placeholders for next rebuild
+# ---------------------------------------------------------------------------
+# After terraform destroy, reset config files back to PLACEHOLDER values
+# so the next run of 03-post-terraform-setup.sh can populate them fresh.
+reset_deployment_placeholders() {
+    log "Step 9: Resetting deployment placeholders for next rebuild..."
+
+    local kong_file="${REPO_DIR}/deck/kong.yaml"
+    local cognito_es="${REPO_DIR}/k8s/external-secrets/munchgo-cognito-secret.yaml"
+    local db_es="${REPO_DIR}/k8s/external-secrets/munchgo-db-secret.yaml"
+    local eso_app="${REPO_DIR}/argocd/apps/09-external-secrets.yaml"
+    local insomnia_file="${REPO_DIR}/insomnia/insomnia-env.json"
+
+    # Reset NLB hostname in kong.yaml back to placeholder
+    if [[ -f "$kong_file" ]]; then
+        # Replace any *.elb.*.amazonaws.com hostname with placeholder
+        sed -i.bak -E 's|http://[a-z0-9-]+\.elb\.[a-z0-9-]+\.amazonaws\.com|http://PLACEHOLDER_NLB_DNS|g' "$kong_file"
+        # Replace any Cognito issuer URL with placeholder
+        sed -i.bak -E 's|https://cognito-idp\.[a-z0-9-]+\.amazonaws\.com/[a-zA-Z0-9_-]+|https://PLACEHOLDER_COGNITO_ISSUER_URL|g' "$kong_file"
+        rm -f "${kong_file}.bak"
+        log "  Reset deck/kong.yaml placeholders"
+    fi
+
+    # Reset external-secrets cognito secret names
+    if [[ -f "$cognito_es" ]]; then
+        sed -i.bak -E 's|key: kong-gw-poc-munchgo-cognito-[a-z0-9]+|key: PLACEHOLDER-munchgo-cognito|g' "$cognito_es"
+        rm -f "${cognito_es}.bak"
+        log "  Reset external-secrets/munchgo-cognito-secret.yaml"
+    fi
+
+    # Reset external-secrets DB secret names
+    if [[ -f "$db_es" ]]; then
+        sed -i.bak -E 's|key: kong-gw-poc-munchgo-rds-[a-z0-9]+|key: PLACEHOLDER-munchgo-rds-master|g' "$db_es"
+        sed -i.bak -E 's|key: kong-gw-poc-munchgo-auth-db-[a-z0-9]+|key: PLACEHOLDER-munchgo-auth-db|g' "$db_es"
+        sed -i.bak -E 's|key: kong-gw-poc-munchgo-consumers-db-[a-z0-9]+|key: PLACEHOLDER-munchgo-consumers-db|g' "$db_es"
+        sed -i.bak -E 's|key: kong-gw-poc-munchgo-restaurants-db-[a-z0-9]+|key: PLACEHOLDER-munchgo-restaurants-db|g' "$db_es"
+        sed -i.bak -E 's|key: kong-gw-poc-munchgo-couriers-db-[a-z0-9]+|key: PLACEHOLDER-munchgo-couriers-db|g' "$db_es"
+        sed -i.bak -E 's|key: kong-gw-poc-munchgo-orders-db-[a-z0-9]+|key: PLACEHOLDER-munchgo-orders-db|g' "$db_es"
+        sed -i.bak -E 's|key: kong-gw-poc-munchgo-sagas-db-[a-z0-9]+|key: PLACEHOLDER-munchgo-sagas-db|g' "$db_es"
+        rm -f "${db_es}.bak"
+        log "  Reset external-secrets/munchgo-db-secret.yaml"
+    fi
+
+    # Reset ESO IRSA role ARN
+    if [[ -f "$eso_app" ]]; then
+        sed -i.bak -E 's|arn:aws:iam::[0-9]+:role/[a-zA-Z0-9_-]+external-secrets[a-zA-Z0-9_-]*|PLACEHOLDER_EXTERNAL_SECRETS_ROLE_ARN|g' "$eso_app"
+        rm -f "${eso_app}.bak"
+        log "  Reset argocd/apps/09-external-secrets.yaml"
+    fi
+
+    # Reset Insomnia environment URL
+    if [[ -f "$insomnia_file" ]]; then
+        sed -i.bak -E 's|https://[a-z0-9]+\.cloudfront\.net|https://PLACEHOLDER_CLOUDFRONT_URL|g' "$insomnia_file"
+        rm -f "${insomnia_file}.bak"
+        log "  Reset insomnia/insomnia-env.json"
+    fi
+
+    log "  Placeholder reset complete."
+}
+
+# ---------------------------------------------------------------------------
+# Step 10: Clean up stale .env values
+# ---------------------------------------------------------------------------
+cleanup_stale_env_values() {
+    log "Step 10: Cleaning up stale .env values..."
+
+    if [[ ! -f "$ENV_FILE" ]]; then
+        log "  No .env file found — nothing to clean."
+        return
+    fi
+
+    # Remove stale KONNECT_CP_ID (will be re-populated on next rebuild)
+    if grep -q '^KONNECT_CP_ID=' "$ENV_FILE" 2>/dev/null; then
+        sed -i.bak '/^KONNECT_CP_ID=/d' "$ENV_FILE"
+        rm -f "${ENV_FILE}.bak"
+        log "  Removed stale KONNECT_CP_ID from .env"
+    fi
+
+    log "  .env cleanup complete."
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -553,13 +694,19 @@ main() {
     # Delete Konnect resources BEFORE terraform destroy.
     # Kong's TGW attachment must be removed before terraform can delete the TGW.
     delete_konnect_resources
+    cleanup_all_kong_networks
     wait_for_kong_tgw_detach
 
     terraform_destroy
     cleanup_cloudfront_cfn_stacks
 
+    # Post-destroy cleanup
+    reset_deployment_placeholders
+    cleanup_stale_env_values
+
     echo ""
     log "Full stack teardown complete (EKS + CloudFront + WAF + Konnect)."
+    log "Config files reset to placeholders — ready for next rebuild."
     echo ""
 }
 

@@ -24,6 +24,15 @@
 # Guard: only create Konnect resources when token is provided
 locals {
   konnect_enabled = var.konnect_token != ""
+
+  # Kong Cloud Gateway AZ names differ from standard AWS AZ names.
+  # Map AWS region → Kong AZ identifiers for the network resource.
+  kong_az_map = {
+    "ap-southeast-2" = ["apse2-az1", "apse2-az2"]
+    "us-west-2"      = ["usw2-az1", "usw2-az2"]
+    "us-east-1"      = ["use1-az1", "use1-az2"]
+    "eu-west-1"      = ["euw1-az1", "euw1-az2"]
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -64,7 +73,7 @@ resource "konnect_gateway_control_plane" "munchgo" {
 }
 
 # ---------------------------------------------------------------------------
-# Cloud Gateway Network (Kong-managed VPC in ap-southeast-2)
+# Cloud Gateway Network (Kong-managed VPC)
 #
 # Note: Provisioning takes ~30 minutes to reach 'ready' state.
 # The Transit Gateway attachment runs AFTER the network is ready —
@@ -75,8 +84,8 @@ resource "konnect_cloud_gateway_network" "munchgo" {
 
   name                              = "munchgo-eks-network"
   cloud_gateway_provider_account_id = local.aws_provider_account_id
-  region                            = "ap-southeast-2"
-  availability_zones                = ["apse2-az1", "apse2-az2"]
+  region                            = var.region
+  availability_zones                = local.kong_az_map[var.region]
   cidr_block                        = var.kong_cloud_gateway_cidr
 }
 
@@ -88,12 +97,12 @@ resource "konnect_cloud_gateway_configuration" "munchgo" {
 
   control_plane_id  = konnect_gateway_control_plane.munchgo[0].id
   version           = "3.9"
-  control_plane_geo = "us"  # Must match CP's actual geo (global API defaults to US)
+  control_plane_geo = var.konnect_region
 
   dataplane_groups = [
     {
       provider                 = "aws"
-      region                   = "ap-southeast-2"
+      region                   = var.region
       cloud_gateway_network_id = konnect_cloud_gateway_network.munchgo[0].id
       autoscale = {
         configuration_data_plane_group_autoscale_autopilot = {

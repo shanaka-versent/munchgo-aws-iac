@@ -71,7 +71,7 @@ provider "kubernetes" {
 # Only used when konnect_token is provided — Konnect resources are skipped if empty.
 provider "konnect" {
   personal_access_token = var.konnect_token
-  server_url            = "https://global.api.konghq.com"
+  server_url            = "https://${var.konnect_region}.api.konghq.com"
 }
 
 # Helm provider - configured after EKS cluster is created
