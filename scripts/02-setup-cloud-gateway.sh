@@ -49,6 +49,12 @@ DCGW_NETWORK_NAME="munchgo-eks-network"
 DCGW_CIDR="192.168.0.0/16"
 KONG_GW_VERSION="3.9"
 
+# Konnect API base URLs (derived from KONNECT_REGION)
+# - Global: cloud gateway resources (networks, configurations, provider accounts)
+# - Regional: control plane CRUD, decK sync
+KONNECT_GLOBAL_API="https://global.api.konghq.com"
+KONNECT_REGIONAL_API="https://${KONNECT_REGION:-au}.api.konghq.com"
+
 # ---------------------------------------------------------------------------
 # Auto-populate Transit Gateway values from Terraform outputs
 # ---------------------------------------------------------------------------
@@ -131,7 +137,7 @@ create_control_plane() {
     fi
 
     CP_RESPONSE=$(curl -s -X POST \
-        "https://${KONNECT_REGION}.api.konghq.com/v2/control-planes" \
+        "${KONNECT_REGIONAL_API}/v2/control-planes" \
         -H "Authorization: Bearer $KONNECT_TOKEN" \
         -H "Content-Type: application/json" \
         --data "{
@@ -168,7 +174,7 @@ create_network() {
 
     # Get provider account ID for the region
     PROVIDER_ACCOUNTS=$(curl -s \
-        "https://global.api.konghq.com/v2/cloud-gateways/provider-accounts" \
+        "${KONNECT_GLOBAL_API}/v2/cloud-gateways/provider-accounts" \
         -H "Authorization: Bearer $KONNECT_TOKEN")
 
     PROVIDER_ACCOUNT_ID=$(echo "$PROVIDER_ACCOUNTS" | jq -r \
@@ -183,7 +189,7 @@ create_network() {
     fi
 
     NETWORK_RESPONSE=$(curl -s -X POST \
-        "https://global.api.konghq.com/v2/cloud-gateways/networks" \
+        "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks" \
         -H "Authorization: Bearer $KONNECT_TOKEN" \
         -H "Content-Type: application/json" \
         --data "{
@@ -202,7 +208,7 @@ create_network() {
         if [[ "$QUOTA_ERROR" == "Quota Exceeded" ]]; then
             warn "Network quota reached — looking for an existing ready network in ap-southeast-2..."
             EXISTING_NETWORKS=$(curl -s \
-                "https://global.api.konghq.com/v2/cloud-gateways/networks" \
+                "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks" \
                 -H "Authorization: Bearer $KONNECT_TOKEN")
             NETWORK_ID=$(echo "$EXISTING_NETWORKS" | jq -r \
                 '.data[] | select(.region == "ap-southeast-2" and .state == "ready") | .id' | head -1)
@@ -240,7 +246,7 @@ create_dp_group() {
     fi
 
     CONFIG_RESPONSE=$(curl -s -X PUT \
-        "https://global.api.konghq.com/v2/cloud-gateways/configurations" \
+        "${KONNECT_GLOBAL_API}/v2/cloud-gateways/configurations" \
         -H "Authorization: Bearer $KONNECT_TOKEN" \
         -H "Content-Type: application/json" \
         --data "{
@@ -276,7 +282,7 @@ share_ram_with_kong() {
     # Fetch Kong's AWS account ID from Konnect provider accounts
     KONG_AWS_ACCOUNT_ID=$(curl -s \
         -H "Authorization: Bearer $KONNECT_TOKEN" \
-        "https://global.api.konghq.com/v2/cloud-gateways/provider-accounts" \
+        "${KONNECT_GLOBAL_API}/v2/cloud-gateways/provider-accounts" \
         | jq -r '.data[] | select(.provider == "aws") | .provider_account_id' | head -1)
 
     if [[ -z "$KONG_AWS_ACCOUNT_ID" || "$KONG_AWS_ACCOUNT_ID" == "null" ]]; then
@@ -335,7 +341,7 @@ attach_transit_gateway() {
     while [[ $waited -lt $max_wait ]]; do
         NETWORK_STATE=$(curl -s \
             -H "Authorization: Bearer $KONNECT_TOKEN" \
-            "https://global.api.konghq.com/v2/cloud-gateways/networks/${NETWORK_ID}" \
+            "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${NETWORK_ID}" \
             | jq -r '.state')
 
         if [[ "$NETWORK_STATE" == "ready" ]]; then
@@ -357,7 +363,7 @@ attach_transit_gateway() {
     log "  Attaching Transit Gateway to Cloud Gateway Network"
 
     TGW_RESPONSE=$(curl -s -X POST \
-        "https://global.api.konghq.com/v2/cloud-gateways/networks/${NETWORK_ID}/transit-gateways" \
+        "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${NETWORK_ID}/transit-gateways" \
         -H "Authorization: Bearer $KONNECT_TOKEN" \
         -H "Content-Type: application/json" \
         --data "{
@@ -389,7 +395,7 @@ attach_transit_gateway() {
     while [[ $tgw_waited -lt $tgw_max ]]; do
         TGW_STATE=$(curl -s \
             -H "Authorization: Bearer $KONNECT_TOKEN" \
-            "https://global.api.konghq.com/v2/cloud-gateways/networks/${NETWORK_ID}/transit-gateways/${TGW_ATT_ID}" \
+            "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${NETWORK_ID}/transit-gateways/${TGW_ATT_ID}" \
             | jq -r '.state')
 
         if [[ "$TGW_STATE" == "ready" ]]; then
@@ -426,7 +432,7 @@ show_next_steps() {
     echo ""
     echo "  2. Update deck/kong.yaml with the NLB hostname, then sync:"
     echo "     deck gateway sync deck/kong.yaml \\"
-    echo "       --konnect-addr https://\${KONNECT_REGION}.api.konghq.com \\"
+    echo "       --konnect-addr ${KONNECT_REGIONAL_API} \\"
     echo "       --konnect-token \$KONNECT_TOKEN \\"
     echo "       --konnect-control-plane-name ${CP_NAME}"
     echo ""
@@ -466,13 +472,20 @@ main() {
 
         CONTROL_PLANE_ID="${KONNECT_CP_ID:-}"
         if [[ -z "$CONTROL_PLANE_ID" ]]; then
+            # Try global API first (Terraform creates CPs here), fall back to regional
             CONTROL_PLANE_ID=$(curl -s \
-                "https://${KONNECT_REGION}.api.konghq.com/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
+                "${KONNECT_GLOBAL_API}/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
                 -H "Authorization: Bearer $KONNECT_TOKEN" \
                 | jq -r ".data[] | select(.name == \"${CP_NAME}\") | .id" | head -1)
+            if [[ -z "$CONTROL_PLANE_ID" || "$CONTROL_PLANE_ID" == "null" ]]; then
+                CONTROL_PLANE_ID=$(curl -s \
+                    "${KONNECT_REGIONAL_API}/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
+                    -H "Authorization: Bearer $KONNECT_TOKEN" \
+                    | jq -r ".data[] | select(.name == \"${CP_NAME}\") | .id" | head -1)
+            fi
         fi
         NETWORK_ID=$(curl -s \
-            "https://global.api.konghq.com/v2/cloud-gateways/networks" \
+            "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks" \
             -H "Authorization: Bearer $KONNECT_TOKEN" \
             | jq -r ".data[] | select(.name == \"munchgo-eks-network\") | .id" | head -1)
 

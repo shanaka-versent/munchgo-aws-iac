@@ -43,6 +43,10 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error(){ echo -e "${RED}[ERROR]${NC} $*"; }
 info() { echo -e "${CYAN}[CONFIG]${NC} $*"; }
 
+# Konnect API base URLs (derived from KONNECT_REGION)
+KONNECT_GLOBAL_API="https://global.api.konghq.com"
+KONNECT_REGIONAL_API="https://${KONNECT_REGION:-au}.api.konghq.com"
+
 # ---------------------------------------------------------------------------
 # Read all Terraform outputs
 # ---------------------------------------------------------------------------
@@ -343,22 +347,21 @@ sync_kong_config() {
     if [[ -z "${KONNECT_TOKEN:-}" ]]; then
         warn "KONNECT_TOKEN not set — skipping Kong sync"
         warn "Set KONNECT_TOKEN in .env and re-run, or sync manually:"
-        warn "  deck gateway sync deck/kong.yaml --konnect-addr https://\${KONNECT_REGION}.api.konghq.com --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name \$KONNECT_CONTROL_PLANE_NAME"
+        warn "  deck gateway sync deck/kong.yaml --konnect-addr \${KONNECT_REGIONAL_API} --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name \$KONNECT_CONTROL_PLANE_NAME"
         return
     fi
 
-    local REGION="${KONNECT_REGION:-au}"
     local CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-MunchGo}"
 
     log "Syncing Kong configuration to Konnect (${CP_NAME})..."
     if deck gateway sync "$KONG_FILE" \
-        --konnect-addr "https://${REGION}.api.konghq.com" \
+        --konnect-addr "${KONNECT_REGIONAL_API}" \
         --konnect-token "$KONNECT_TOKEN" \
         --konnect-control-plane-name "$CP_NAME"; then
         info "  Kong routes synced successfully"
     else
         error "  Kong sync failed — check deck output above"
-        warn "  Retry manually: deck gateway sync deck/kong.yaml --konnect-addr https://${REGION}.api.konghq.com --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name ${CP_NAME}"
+        warn "  Retry manually: deck gateway sync deck/kong.yaml --konnect-addr ${KONNECT_REGIONAL_API} --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name ${CP_NAME}"
     fi
 }
 
@@ -448,13 +451,13 @@ get_konnect_cp_id() {
     fi
 
     local CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-MunchGo}"
-    local REGION="${KONNECT_REGION:-au}"
 
     log "Looking up Konnect CP ID for control plane '${CP_NAME}' via API..."
 
     local RESPONSE
+    # Use global API (Terraform creates CPs on the global endpoint)
     RESPONSE=$(curl -s \
-        "https://${REGION}.api.konghq.com/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
+        "${KONNECT_GLOBAL_API}/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
         -H "Authorization: Bearer ${KONNECT_TOKEN}" 2>/dev/null || echo "{}")
 
     KONNECT_CP_ID=$(echo "$RESPONSE" | python3 -c "

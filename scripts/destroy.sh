@@ -52,6 +52,10 @@ error()  { echo -e "${RED}[ERROR]${NC} $*"; }
 CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-MunchGo}"
 DCGW_NETWORK_NAME="munchgo-eks-network"
 
+# Konnect API base URLs (derived from KONNECT_REGION)
+KONNECT_GLOBAL_API="https://global.api.konghq.com"
+KONNECT_REGIONAL_API="https://${KONNECT_REGION:-au}.api.konghq.com"
+
 # ---------------------------------------------------------------------------
 # Pre-flight checks
 # ---------------------------------------------------------------------------
@@ -283,6 +287,56 @@ terraform_destroy() {
         tf_args="-var-file=terraform.tfvars -auto-approve"
     fi
 
+    # Export Konnect token so the provider can authenticate during destroy
+    if [[ -n "${KONNECT_TOKEN:-}" ]]; then
+        export TF_VAR_konnect_token="${KONNECT_TOKEN}"
+    fi
+
+    # Check if the Transit Gateway is shared with other projects.
+    # If non-MunchGo VPC attachments exist, remove the TGW from state
+    # instead of trying to delete it (which would fail and disrupt other projects).
+    if terraform state list 2>/dev/null | grep -q 'aws_ec2_transit_gateway.kong'; then
+        local tgw_id
+        tgw_id=$(terraform state show 'aws_ec2_transit_gateway.kong' 2>/dev/null | \
+            grep '^\s*id\s' | awk '{print $NF}' | tr -d '"' || true)
+
+        if [[ -n "$tgw_id" ]]; then
+            local non_deleted_attachments
+            non_deleted_attachments=$(aws ec2 describe-transit-gateway-attachments \
+                --filters "Name=transit-gateway-id,Values=${tgw_id}" \
+                --query 'TransitGatewayAttachments[?State!=`deleted`].TransitGatewayAttachmentId' \
+                --output text 2>/dev/null || true)
+
+            # Get our own EKS attachment ID (if still in state)
+            local our_attachment=""
+            if terraform state list 2>/dev/null | grep -q 'aws_ec2_transit_gateway_vpc_attachment.eks'; then
+                our_attachment=$(terraform state show 'aws_ec2_transit_gateway_vpc_attachment.eks' 2>/dev/null | \
+                    grep '^\s*id\s' | awk '{print $NF}' | tr -d '"' || true)
+            fi
+
+            # Check if there are attachments OTHER than ours
+            local has_foreign_attachments=false
+            if [[ -n "$non_deleted_attachments" ]]; then
+                for att_id in $non_deleted_attachments; do
+                    if [[ "$att_id" != "$our_attachment" ]]; then
+                        has_foreign_attachments=true
+                        break
+                    fi
+                done
+            fi
+
+            if [[ "$has_foreign_attachments" == true ]]; then
+                warn "  Transit Gateway ${tgw_id} has attachments from other projects."
+                warn "  Removing TGW from terraform state to avoid disrupting other projects."
+                terraform state rm aws_ec2_transit_gateway.kong 2>/dev/null || true
+                terraform state rm aws_ram_resource_share.kong_tgw 2>/dev/null || true
+                terraform state rm aws_ram_resource_association.kong_tgw 2>/dev/null || true
+                terraform state rm 'aws_route.kong_cloud_gw[0]' 2>/dev/null || true
+                terraform state rm aws_security_group_rule.allow_kong_cloud_gw 2>/dev/null || true
+            fi
+        fi
+    fi
+
     terraform destroy $tf_args
 
     log "Terraform destroy complete."
@@ -345,7 +399,6 @@ delete_konnect_resources() {
     log "Step 5: Deleting Kong Cloud Gateway resources in Konnect..."
 
     local tf_dir="${SCRIPT_DIR}/../terraform"
-    local global_api="https://global.api.konghq.com"
 
     # --- IaC path: use terraform destroy -target for managed resources ---
     if [[ -d "${tf_dir}/.terraform" ]]; then
@@ -383,13 +436,12 @@ delete_konnect_resources() {
         return
     fi
 
-    local regional_api="https://${KONNECT_REGION}.api.konghq.com"
     local auth_header="Authorization: Bearer ${KONNECT_TOKEN}"
 
     # --- Find network and delete TGW attachments + network first ---
     log "  Looking up network: ${DCGW_NETWORK_NAME}"
     local networks
-    networks=$(curl -s "${global_api}/v2/cloud-gateways/networks" -H "$auth_header")
+    networks=$(curl -s "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks" -H "$auth_header")
     local network_id
     network_id=$(echo "$networks" | jq -r \
         ".data[] | select(.name == \"${DCGW_NETWORK_NAME}\") | .id" | head -1)
@@ -398,7 +450,7 @@ delete_konnect_resources() {
         # Delete transit gateway attachments first
         log "  Deleting Transit Gateway attachments from network ${network_id}..."
         local tgw_list
-        tgw_list=$(curl -s "${global_api}/v2/cloud-gateways/networks/${network_id}/transit-gateways" \
+        tgw_list=$(curl -s "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${network_id}/transit-gateways" \
             -H "$auth_header")
         local tgw_ids
         tgw_ids=$(echo "$tgw_list" | jq -r '.data[].id // empty' 2>/dev/null || true)
@@ -407,7 +459,7 @@ delete_konnect_resources() {
             echo "$tgw_ids" | while read -r tgw_id; do
                 [[ -z "$tgw_id" ]] && continue
                 curl -s -X DELETE \
-                    "${global_api}/v2/cloud-gateways/networks/${network_id}/transit-gateways/${tgw_id}" \
+                    "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${network_id}/transit-gateways/${tgw_id}" \
                     -H "$auth_header" >/dev/null 2>&1 || true
                 log "  Deleted transit gateway attachment: ${tgw_id}"
             done
@@ -419,7 +471,7 @@ delete_konnect_resources() {
         log "  Deleting network: ${network_id}"
         local delete_resp
         delete_resp=$(curl -s -w "\n%{http_code}" -X DELETE \
-            "${global_api}/v2/cloud-gateways/networks/${network_id}" \
+            "${KONNECT_GLOBAL_API}/v2/cloud-gateways/networks/${network_id}" \
             -H "$auth_header")
         local http_code
         http_code=$(echo "$delete_resp" | tail -1)
@@ -437,7 +489,7 @@ delete_konnect_resources() {
     # --- Delete control plane (cascades to DP group configs) ---
     log "  Looking up control plane: ${CP_NAME}"
     local cp_list
-    cp_list=$(curl -s "${regional_api}/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
+    cp_list=$(curl -s "${KONNECT_REGIONAL_API}/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
         -H "$auth_header")
     local cp_id
     cp_id=$(echo "$cp_list" | jq -r '.data[0].id // empty')
@@ -446,7 +498,7 @@ delete_konnect_resources() {
         log "  Deleting control plane: ${cp_id}..."
         local cp_delete_resp
         cp_delete_resp=$(curl -s -w "\n%{http_code}" -X DELETE \
-            "${regional_api}/v2/control-planes/${cp_id}" \
+            "${KONNECT_REGIONAL_API}/v2/control-planes/${cp_id}" \
             -H "$auth_header")
         local cp_http_code
         cp_http_code=$(echo "$cp_delete_resp" | tail -1)

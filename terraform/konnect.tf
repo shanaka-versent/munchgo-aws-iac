@@ -29,7 +29,7 @@ locals {
 # ---------------------------------------------------------------------------
 # Data: look up Kong's AWS provider account linked to this Konnect org
 # ---------------------------------------------------------------------------
-data "konnect_cloud_gateway_provider_accounts" "main" {
+data "konnect_cloud_gateway_provider_account_list" "main" {
   count = local.konnect_enabled ? 1 : 0
 }
 
@@ -37,10 +37,10 @@ locals {
   # First AWS provider account in the org (typically only one per region)
   aws_provider_account_id = local.konnect_enabled ? (
     length([
-      for a in data.konnect_cloud_gateway_provider_accounts.main[0].data :
+      for a in data.konnect_cloud_gateway_provider_account_list.main[0].data :
       a.id if a.provider == "aws"
     ]) > 0 ? [
-      for a in data.konnect_cloud_gateway_provider_accounts.main[0].data :
+      for a in data.konnect_cloud_gateway_provider_account_list.main[0].data :
       a.id if a.provider == "aws"
     ][0] : ""
   ) : ""
@@ -88,7 +88,7 @@ resource "konnect_cloud_gateway_configuration" "munchgo" {
 
   control_plane_id  = konnect_gateway_control_plane.munchgo[0].id
   version           = "3.9"
-  control_plane_geo = var.konnect_region
+  control_plane_geo = "us"  # Must match CP's actual geo (global API defaults to US)
 
   dataplane_groups = [
     {
@@ -96,8 +96,10 @@ resource "konnect_cloud_gateway_configuration" "munchgo" {
       region                   = "ap-southeast-2"
       cloud_gateway_network_id = konnect_cloud_gateway_network.munchgo[0].id
       autoscale = {
-        kind     = "autopilot"
-        base_rps = 100
+        configuration_data_plane_group_autoscale_autopilot = {
+          kind     = "autopilot"
+          base_rps = 100
+        }
       }
     }
   ]
