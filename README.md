@@ -767,6 +767,7 @@ The Insomnia collection runs automatically via GitHub Actions ([`.github/workflo
 - Terraform >= 1.5
 - kubectl + Helm 3
 - [decK CLI](https://docs.konghq.com/deck/latest/)
+- [GitHub CLI (`gh`)](https://cli.github.com/) — for CI/CD automation (repo variables, workflow triggers)
 - [Kong Konnect](https://konghq.com/products/kong-konnect) account with Dedicated Cloud Gateway entitlement
 
 ---
@@ -842,16 +843,19 @@ graph TB
 cp .env.example .env
 ```
 
-Edit `.env` — only **4 values** needed to start:
+Edit `.env` — only **5 values** needed to start:
 
 ```bash
 AWS_PROFILE="your-aws-profile"
 KONNECT_REGION="au"                   # us, eu, or au
 KONNECT_TOKEN="kpat_your_token_here"  # from cloud.konghq.com → Settings → PAT
 KONNECT_CONTROL_PLANE_NAME="MunchGo"
+ARGOCD_GH_TOKEN="ghp_your_token"      # GitHub PAT (repo + workflow scopes)
 ```
 
 > `.env` is **gitignored** — your token never gets committed. All scripts auto-source it. The `KONNECT_CP_ID` is resolved and written automatically from Terraform state.
+
+**`ARGOCD_GH_TOKEN`** is used for: (1) ArgoCD credential template to access the private `munchgo-k8s-config` repo, (2) `gh` CLI operations to update GitHub repo variables and trigger CI workflows. Generate at [GitHub → Settings → Tokens](https://github.com/settings/tokens) with `repo` + `workflow` scopes.
 
 **Token in CI/CD:** The same `KONNECT_TOKEN` GitHub Actions secret is used by both the `deck gateway sync` workflow and Terraform (`TF_VAR_konnect_token`). No separate secrets needed.
 
@@ -873,7 +877,7 @@ Creates **all layers in one shot:**
 
 ArgoCD immediately begins syncing all Layer 3 child apps via sync waves. The `09-munchgo-apps.yaml` bridge (wave 8) discovers Layer 4 service Applications from the `munchgo-k8s-config` GitOps repo.
 
-> CloudFront + WAF (Layer 6) is deployed in Step 8 after the Kong proxy URL is available.
+> CloudFront + WAF (Layer 6) is deployed automatically by `03-post-terraform-setup.sh` — the Kong proxy domain is auto-discovered from the Konnect API.
 
 ### Step 3: Configure kubectl
 
@@ -904,13 +908,15 @@ This looks up the existing control plane and network (created by Terraform), sha
 
 > **`KONNECT_CP_ID` is zero-touch** — Terraform writes it to state. `03-post-terraform-setup.sh` reads it from `terraform output konnect_control_plane_id` automatically.
 
-### Step 6: Populate Config Placeholders
+### Step 6: Post-Deployment Automation
 
 ```bash
 ./scripts/03-post-terraform-setup.sh
 ```
 
-Reads all Terraform outputs and populates every placeholder across the deployment:
+This single script handles **everything** after `terraform apply` — no manual steps required:
+
+**Config placeholder population:**
 
 | File | What gets populated |
 |------|---------------------|
@@ -920,12 +926,21 @@ Reads all Terraform outputs and populates every placeholder across the deploymen
 | `munchgo-k8s-config/overlays/dev/auth-service/kustomization.yaml` | Cognito IRSA role ARN |
 | `insomnia/munchgo-api.json` | CloudFront `base_url` for automated API tests |
 
-The script also:
-- **Creates the Kafka config secret** from MSK bootstrap brokers
-- **Resolves `KONNECT_CP_ID`** — three-priority lookup: (1) `.env` if already set, (2) `terraform output konnect_control_plane_id` from Terraform state, (3) Konnect API lookup by control-plane name. Persists to `.env` for future runs.
-- **Creates `konnect-token` K8s secret** in the `observability` namespace (used by the Kong analytics exporter CronJob)
-- **Syncs Kong routes to Konnect** via `deck gateway sync`
-- **Seeds the default admin user** (`admin@munchgo.com` / `Admin@123`) in Cognito and auth-service database
+**Automated infrastructure tasks:**
+
+| Task | What it does |
+|------|-------------|
+| **Discover Kong proxy domain** | Queries Konnect API for CP endpoint prefix, constructs proxy domain, updates `terraform.tfvars`, runs targeted `terraform apply` for CloudFront |
+| **ArgoCD repo credentials** | Creates credential template secret for private `munchgo-k8s-config` repo (uses `ARGOCD_GH_TOKEN` from `.env`) |
+| **VPC route verification** | Checks AWS route tables for Kong CIDR route, recreates via `terraform apply -replace` if missing |
+| **Kafka config secret** | Creates K8s secret from MSK bootstrap brokers |
+| **Kong route sync** | Syncs routes/services/plugins to Konnect via `deck gateway sync` |
+| **Konnect token secret** | Creates `konnect-token` K8s secret for the analytics exporter CronJob |
+| **Admin user seeding** | Creates `admin@munchgo.com` / `Admin@123` in Cognito and auth-service database |
+| **GitHub CI/CD variables** | Updates `CLOUDFRONT_URL`, `CLOUDFRONT_DISTRIBUTION_ID`, `SPA_BUCKET_NAME` in `munchgo-spa` repo |
+| **Microservices CI trigger** | Triggers all 6 microservice CI workflows + SPA deploy to push images to ECR |
+
+> **CloudFront is mandatory** — WAF rules protect against OWASP Top 10, bot traffic, and DDoS. The CloudFront→Kong origin uses mTLS to prevent bypassing edge security. The proxy domain is auto-discovered — no manual Konnect UI lookup needed.
 
 ### Step 7: Commit & Push Populated Config
 
@@ -936,21 +951,6 @@ git push
 ```
 
 ArgoCD picks up the ExternalSecret changes and syncs DB credentials to the cluster.
-
-### Step 8: Deploy CloudFront + WAF
-
-Get the **Public Edge DNS** from Konnect UI → Gateway Manager → Connect:
-
-```hcl
-# terraform/terraform.tfvars
-kong_cloud_gateway_domain = "<hash>.aws-ap-southeast-2.edge.gateways.konggateway.com"
-```
-
-```bash
-terraform -chdir=terraform apply
-```
-
-> **CloudFront is mandatory** — WAF rules protect against OWASP Top 10, bot traffic, and DDoS. The CloudFront→Kong origin uses mTLS to prevent bypassing edge security.
 
 ### Access URL
 
@@ -1196,12 +1196,15 @@ Tears down the **full stack** in the correct order:
 2. **Wait for NLB/ENI cleanup** → prevents VPC deletion failures
 3. **Delete ArgoCD apps** → cascade removes all workloads
 4. **Cleanup CRDs** → removes Gateway API and Istio CRDs
-5. **Delete Konnect resources** → `terraform destroy -target` removes CP, network, and DP group in order (network deletion triggers Kong's TGW attachment removal from their AWS account)
-6. **Wait for Kong's TGW detach** → confirms AWS-side cleanup before TGW is deleted
-7. **Terraform destroy** → removes EKS, VPC, TGW, RAM, ECR, MSK, RDS, S3, Cognito, CloudFront + WAF
-8. **Cleanup CloudFormation stacks** → safety net for orphaned CFN
+5. **Delete Konnect resources** → `terraform destroy -target` removes CP, network, and DP group in order
+6. **Cleanup leftover Kong networks** → deletes ALL remaining networks in the org to prevent quota exhaustion on next rebuild
+7. **Wait for Kong's TGW detach** → confirms AWS-side cleanup before TGW is deleted
+8. **Terraform destroy** → removes EKS, VPC, TGW, RAM, ECR, MSK, RDS, S3, Cognito, CloudFront + WAF
+9. **Cleanup CloudFormation stacks** → safety net for orphaned CFN
+10. **Reset deployment placeholders** → resets `deck/kong.yaml`, external-secrets, and Insomnia configs back to `PLACEHOLDER_*` values for the next rebuild
+11. **Cleanup stale `.env` values** → removes `KONNECT_CP_ID` (will be re-resolved on next deploy)
 
-After teardown, re-running the deployment steps creates a fresh environment. The `KONNECT_CP_ID` is resolved automatically — no manual configuration needed.
+After teardown, re-running the deployment steps creates a fresh environment — all config files are pre-reset to placeholders and ready for `03-post-terraform-setup.sh` to populate.
 
 ---
 

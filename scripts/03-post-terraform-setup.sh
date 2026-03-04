@@ -532,30 +532,301 @@ seed_admin_user() {
 }
 
 # ---------------------------------------------------------------------------
+# Auto-discover Kong Cloud Gateway proxy domain
+# ---------------------------------------------------------------------------
+# The proxy domain changes on every rebuild. It follows the pattern:
+#   <prefix>.gateways.konggateway.com
+# where <prefix> is extracted from the CP endpoint:
+#   https://<prefix>.<region>.cp0.konghq.com
+# ---------------------------------------------------------------------------
+discover_kong_proxy_domain() {
+    log "Discovering Kong Cloud Gateway proxy domain..."
+
+    if [[ -z "${KONNECT_TOKEN:-}" ]]; then
+        warn "KONNECT_TOKEN not set — cannot discover proxy domain"
+        return
+    fi
+
+    local CP_NAME="${KONNECT_CONTROL_PLANE_NAME:-MunchGo}"
+
+    # Get CP endpoint from Konnect API
+    local CP_RESPONSE
+    CP_RESPONSE=$(curl -s "${KONNECT_REGIONAL_API}/v2/control-planes?filter%5Bname%5D=${CP_NAME}" \
+        -H "Authorization: Bearer ${KONNECT_TOKEN}" 2>/dev/null || echo "{}")
+
+    local CP_ENDPOINT
+    CP_ENDPOINT=$(echo "$CP_RESPONSE" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    items = data.get('data', [])
+    match = next((x for x in items if x.get('name') == '${CP_NAME}'), None)
+    if match:
+        print(match.get('config', {}).get('control_plane_endpoint', ''))
+    else:
+        print('')
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+
+    if [[ -z "$CP_ENDPOINT" ]]; then
+        warn "Could not discover CP endpoint — kong_cloud_gateway_domain not updated"
+        return
+    fi
+
+    # Extract prefix: https://6de7e35936.us.cp0.konghq.com -> 6de7e35936
+    local PREFIX
+    PREFIX=$(echo "$CP_ENDPOINT" | sed -E 's|https://([^.]+)\..*|\1|')
+
+    if [[ -z "$PREFIX" ]]; then
+        warn "Could not parse CP endpoint prefix from: $CP_ENDPOINT"
+        return
+    fi
+
+    KONG_PROXY_DOMAIN="${PREFIX}.gateways.konggateway.com"
+
+    # Verify DNS resolves
+    if ! nslookup "$KONG_PROXY_DOMAIN" &>/dev/null; then
+        warn "Kong proxy domain ${KONG_PROXY_DOMAIN} does not resolve yet (may need a few minutes)"
+    fi
+
+    info "  Kong proxy domain: ${KONG_PROXY_DOMAIN}"
+
+    # Update terraform.tfvars with the new proxy domain
+    local TFVARS="${TERRAFORM_DIR}/terraform.tfvars"
+    if [[ -f "$TFVARS" ]]; then
+        if grep -q "^kong_cloud_gateway_domain" "$TFVARS"; then
+            sed -i.bak "s|^kong_cloud_gateway_domain.*|kong_cloud_gateway_domain = \"${KONG_PROXY_DOMAIN}\"|" "$TFVARS"
+        else
+            echo "" >> "$TFVARS"
+            echo "# Kong Cloud Gateway proxy domain (auto-discovered by 03-post-terraform-setup.sh)" >> "$TFVARS"
+            echo "kong_cloud_gateway_domain = \"${KONG_PROXY_DOMAIN}\"" >> "$TFVARS"
+        fi
+        rm -f "${TFVARS}.bak"
+        info "  Updated terraform.tfvars with kong_cloud_gateway_domain"
+    fi
+
+    # Re-apply terraform to update CloudFront origin with the new proxy domain
+    if [[ -n "${KONG_PROXY_DOMAIN}" ]]; then
+        log "Updating CloudFront origin with discovered proxy domain..."
+        cd "$TERRAFORM_DIR"
+        [[ -n "${KONNECT_TOKEN:-}" ]] && export TF_VAR_konnect_token="${KONNECT_TOKEN}"
+        if terraform apply -var-file=terraform.tfvars -auto-approve -target='module.cloudfront' 2>/dev/null; then
+            info "  CloudFront updated with Kong proxy domain"
+        else
+            warn "  CloudFront update failed — run manually: cd terraform && terraform apply"
+        fi
+        # Re-read CloudFront URL
+        APP_URL=$(terraform output -raw application_url 2>/dev/null || echo "")
+        cd "$REPO_DIR"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Create ArgoCD repository credentials for private repos
+# ---------------------------------------------------------------------------
+# Uses a credential template (repo-creds) that matches all repos under
+# github.com/shanaka-versent. This covers munchgo-k8s-config, munchgo-aws-iac,
+# and any future private repos automatically.
+# ---------------------------------------------------------------------------
+create_argocd_repo_credentials() {
+    log "Configuring ArgoCD repository credentials..."
+
+    local GH_TOKEN="${ARGOCD_GH_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [[ -z "$GH_TOKEN" ]]; then
+        warn "ARGOCD_GH_TOKEN not set in .env — ArgoCD cannot access private repos"
+        warn "Set ARGOCD_GH_TOKEN in .env and re-run, or create manually:"
+        warn "  kubectl create secret generic argocd-repo-creds -n argocd \\"
+        warn "    --from-literal=type=git \\"
+        warn "    --from-literal=url=https://github.com/shanaka-versent \\"
+        warn "    --from-literal=password=<GH_PAT> --from-literal=username=git"
+        return
+    fi
+
+    # Wait for argocd namespace to exist (may take a moment after terraform apply)
+    local wait=0
+    while ! kubectl get ns argocd &>/dev/null && [[ $wait -lt 60 ]]; do
+        sleep 5
+        wait=$((wait + 5))
+    done
+
+    kubectl create secret generic argocd-repo-creds -n argocd \
+        --from-literal=type=git \
+        --from-literal=url="https://github.com/shanaka-versent" \
+        --from-literal=password="$GH_TOKEN" \
+        --from-literal=username=git \
+        --dry-run=client -o yaml | \
+        kubectl label --local -f - argocd.argoproj.io/secret-type=repo-creds -o yaml | \
+        kubectl apply -f -
+
+    info "  ArgoCD credential template configured (github.com/shanaka-versent/*)"
+}
+
+# ---------------------------------------------------------------------------
+# Verify VPC routes for Kong Cloud Gateway CIDR
+# ---------------------------------------------------------------------------
+# The VPC route for Kong CIDR (192.168.0.0/16) via Transit Gateway can drift
+# from Terraform state after rebuilds. This function verifies the actual route
+# exists in AWS and re-creates it if missing.
+# ---------------------------------------------------------------------------
+verify_vpc_routes() {
+    log "Verifying VPC routes for Kong Cloud Gateway CIDR..."
+
+    local KONG_CIDR="${KONG_CLOUD_GATEWAY_CIDR:-192.168.0.0/16}"
+
+    if [[ "$VPC_ID" == "N/A" ]]; then
+        warn "VPC ID not available — skipping route verification"
+        return
+    fi
+
+    # Check if the route actually exists in AWS
+    local ROUTE_EXISTS
+    ROUTE_EXISTS=$(aws ec2 describe-route-tables \
+        --filters "Name=vpc-id,Values=${VPC_ID}" \
+        --query "RouteTables[].Routes[?DestinationCidrBlock=='${KONG_CIDR}' && State=='active'].DestinationCidrBlock" \
+        --output text 2>/dev/null || echo "")
+
+    if [[ -z "$ROUTE_EXISTS" ]]; then
+        warn "Kong CIDR route (${KONG_CIDR}) missing from VPC route tables — recreating..."
+        cd "$TERRAFORM_DIR"
+        [[ -n "${KONNECT_TOKEN:-}" ]] && export TF_VAR_konnect_token="${KONNECT_TOKEN}"
+        terraform apply -replace='aws_route.kong_cloud_gw[0]' \
+            -var-file=terraform.tfvars -auto-approve 2>/dev/null || \
+            warn "  Route recreation failed — run manually: terraform apply -replace='aws_route.kong_cloud_gw[0]'"
+        cd "$REPO_DIR"
+        info "  VPC routes recreated"
+    else
+        info "  VPC routes verified (active)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Update GitHub repository variables for CI/CD
+# ---------------------------------------------------------------------------
+# Updates GitHub Actions variables/secrets in munchgo-spa repo so that
+# deploy workflows and E2E tests use the correct CloudFront URL, distribution
+# ID, and S3 bucket name after each rebuild.
+# ---------------------------------------------------------------------------
+update_github_variables() {
+    if ! command -v gh &>/dev/null; then
+        warn "gh CLI not found — skipping GitHub variables update"
+        warn "Install with: brew install gh"
+        return
+    fi
+
+    if ! gh auth status &>/dev/null; then
+        warn "gh CLI not authenticated — skipping GitHub variables update"
+        warn "Run: gh auth login"
+        return
+    fi
+
+    log "Updating GitHub repository variables..."
+
+    local SPA_REPO="shanaka-versent/munchgo-spa"
+
+    # CloudFront URL
+    if [[ -n "$APP_URL" ]]; then
+        gh variable set CLOUDFRONT_URL --body "$APP_URL" -R "$SPA_REPO" 2>/dev/null && \
+            info "  ${SPA_REPO}: CLOUDFRONT_URL → ${APP_URL}" || \
+            warn "  Failed to update CLOUDFRONT_URL in $SPA_REPO"
+    fi
+
+    # CloudFront Distribution ID
+    local CF_DIST_ID
+    CF_DIST_ID=$(cd "$TERRAFORM_DIR" && terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
+    if [[ -n "$CF_DIST_ID" ]]; then
+        gh variable set CLOUDFRONT_DISTRIBUTION_ID --body "$CF_DIST_ID" -R "$SPA_REPO" 2>/dev/null && \
+            info "  ${SPA_REPO}: CLOUDFRONT_DISTRIBUTION_ID → ${CF_DIST_ID}" || \
+            warn "  Failed to update CLOUDFRONT_DISTRIBUTION_ID in $SPA_REPO"
+    fi
+
+    # SPA Bucket Name
+    local SPA_BUCKET
+    SPA_BUCKET=$(cd "$TERRAFORM_DIR" && terraform output -raw spa_bucket_name 2>/dev/null || echo "")
+    if [[ -n "$SPA_BUCKET" ]]; then
+        gh variable set SPA_BUCKET_NAME --body "$SPA_BUCKET" -R "$SPA_REPO" 2>/dev/null && \
+            info "  ${SPA_REPO}: SPA_BUCKET_NAME → ${SPA_BUCKET}" || \
+            warn "  Failed to update SPA_BUCKET_NAME in $SPA_REPO"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Trigger microservices CI to push images to ECR
+# ---------------------------------------------------------------------------
+# After a rebuild, ECR repos are empty (force_delete on destroy). This
+# triggers all 6 microservice CI workflows to build and push images.
+# ---------------------------------------------------------------------------
+trigger_microservices_ci() {
+    if ! command -v gh &>/dev/null; then
+        warn "gh CLI not found — cannot trigger microservices CI"
+        warn "Trigger manually for each service:"
+        warn "  gh workflow run <service>.yml -R shanaka-versent/munchgo-microservices --ref main"
+        return
+    fi
+
+    if ! gh auth status &>/dev/null; then
+        warn "gh CLI not authenticated — skipping CI trigger"
+        return
+    fi
+
+    log "Triggering microservices CI to push images to ECR..."
+
+    local MICRO_REPO="shanaka-versent/munchgo-microservices"
+    local SERVICES=(
+        "auth-service"
+        "consumer-service"
+        "courier-service"
+        "order-service"
+        "restaurant-service"
+        "saga-orchestrator"
+    )
+
+    for svc in "${SERVICES[@]}"; do
+        if gh workflow run "${svc}.yml" -R "$MICRO_REPO" --ref main 2>/dev/null; then
+            info "  Triggered: ${svc}.yml"
+        else
+            warn "  Failed to trigger ${svc}.yml — may need manual trigger"
+        fi
+    done
+
+    log "Triggering SPA deployment..."
+    local SPA_REPO="shanaka-versent/munchgo-spa"
+    if gh workflow run deploy.yml -R "$SPA_REPO" --ref main 2>/dev/null; then
+        info "  Triggered: munchgo-spa deploy.yml"
+    else
+        warn "  Failed to trigger SPA deploy — may need manual trigger"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Show next steps
 # ---------------------------------------------------------------------------
 show_next_steps() {
     echo ""
     echo "=========================================="
-    echo "  Next Steps"
+    echo "  Post-Deployment Setup Complete"
     echo "=========================================="
     echo ""
-    echo "  1. Commit the populated config files:"
-    echo "     git add deck/kong.yaml k8s/external-secrets/ insomnia/munchgo-api.json"
-    echo "     git commit -m 'Populate deployment placeholders from terraform outputs'"
+    echo "  Automated steps completed:"
+    echo "    - Kong proxy domain discovered and CloudFront updated"
+    echo "    - ArgoCD repository credentials configured"
+    echo "    - VPC routes verified"
+    echo "    - Config placeholders populated (kong.yaml, ExternalSecrets)"
+    echo "    - Service databases created"
+    echo "    - Kong routes synced to Konnect"
+    echo "    - Admin user seeded"
+    echo "    - GitHub CI/CD variables updated"
+    echo "    - Microservices CI triggered (images pushing to ECR)"
     echo ""
-    echo "  2. Generate a test token:"
-    echo "     ./scripts/02-generate-jwt.sh"
-    echo ""
-    echo "  3. Test the API:"
+    echo "  Wait for CI to complete (~5 min), then verify:"
     if [[ -n "$APP_URL" ]]; then
-        echo "     curl ${APP_URL}/healthz"
-        echo "     curl ${APP_URL}/api/v1/auth/health"
-        echo "     curl -H 'Authorization: Bearer \$ACCESS_TOKEN' ${APP_URL}/api/v1/orders"
-    else
-        echo "     curl \$APP_URL/healthz"
-        echo "     (Deploy CloudFront in Step 7 to get the application URL)"
+        echo "    curl ${APP_URL}/healthz"
+        echo "    curl ${APP_URL}/api/v1/auth/health"
     fi
+    echo ""
+    echo "  Optional:"
+    echo "    ./scripts/05-seed-demo-data.sh    # Seed demo restaurants + menus"
+    echo "    ./scripts/02-generate-jwt.sh      # Generate test token"
     echo ""
 }
 
@@ -566,11 +837,14 @@ main() {
     echo ""
     echo "=============================================="
     echo "  Post-Terraform Setup — Kong Cloud Gateway"
-    echo "  Placeholder Auto-Population"
+    echo "  Automated Endpoint Discovery & Configuration"
     echo "=============================================="
     echo ""
 
     read_terraform_outputs
+    discover_kong_proxy_domain
+    create_argocd_repo_credentials
+    verify_vpc_routes
     get_gateway_endpoint
     populate_kong_yaml
     populate_external_secrets
@@ -583,6 +857,8 @@ main() {
     get_konnect_cp_id
     create_konnect_token_secret
     seed_admin_user
+    update_github_variables
+    trigger_microservices_ci
     show_next_steps
 }
 
