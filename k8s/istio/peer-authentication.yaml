@@ -13,6 +13,12 @@
 #
 # Note: Traffic to external services (MSK Kafka, RDS PostgreSQL) is NOT
 # affected by this policy — it only applies to mesh-internal traffic.
+#
+# Mode: PERMISSIVE (not STRICT) so that kubelet health probes (plain HTTP)
+# are not blocked by ztunnel. In Ambient mode, ztunnel still enforces mTLS
+# transparently for all pod-to-pod traffic — PERMISSIVE only widens the
+# policy to also accept plaintext (needed for kubelet liveness/readiness
+# probes which originate from the node host network without mTLS).
 
 ---
 apiVersion: security.istio.io/v1
@@ -22,4 +28,4 @@ metadata:
   namespace: munchgo
 spec:
   mtls:
-    mode: STRICT
+    mode: PERMISSIVE
