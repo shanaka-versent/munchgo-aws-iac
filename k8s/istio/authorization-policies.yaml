@@ -136,7 +136,17 @@ spec:
             namespaces: ["istio-ingress"]
 
 ---
-# Allow health checks from any source (actuator endpoints)
+# Allow health checks from kubelet (ztunnel-compatible L4 port rule)
+#
+# In Istio Ambient mode, ztunnel only enforces L4 policies. HTTP attributes
+# (methods, paths) require the waypoint proxy (L7). A policy with HTTP rules
+# and no targetRefs is processed by ztunnel, which silently drops the rule —
+# making it unreachable (status: "Allow rules with HTTP attributes will be empty
+# and never match"). This blocks kubelet liveness/readiness probes because
+# those plaintext connections match no ALLOW rule.
+#
+# Fix: Use a port-based L4 rule (ztunnel-supported). NetworkPolicy
+# allow-kubelet-probes provides source-IP restriction at the CNI level.
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
@@ -147,5 +157,4 @@ spec:
   rules:
     - to:
         - operation:
-            paths: ["/actuator/health/*", "/actuator/health"]
-            methods: ["GET"]
+            ports: ["8080"]
