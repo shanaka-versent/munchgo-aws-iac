@@ -561,10 +561,10 @@ No secrets in Git. Use External Secrets Operator to sync from Secrets Manager / 
 
 Create automation scripts in each IaC repo:
 
-- `01-generate-certs.sh` — generate self-signed CA + TLS cert for Istio Gateway
+- `01-generate-certs.sh` — generate self-signed CA + TLS cert for Istio Gateway (called automatically by 03)
 - `02-setup-cloud-gateway.sh` — provision Kong Konnect, configure Transit Gateway/VNet Peering
-- `03-post-terraform-setup.sh` — infrastructure config (placeholders, Kong sync, VPC routes)
-- `04-deploy-apps.sh` — application deployment (CI triggers, seeding, smoke tests)
+- `03-post-terraform-setup.sh` — infrastructure config (placeholders, TLS certs, Kong sync, VPC routes, GitHub CI/CD secrets)
+- `04-deploy-apps.sh` — application deployment (CI triggers, SPA deploy, seeding, smoke tests)
 - `seed-admin-user.sh` — create admin user in Cognito (helper, called by 04)
 - `seed-demo-data.sh` — seed demo restaurants + menus (helper, called by 04)
 - `destroy.sh` — ordered teardown

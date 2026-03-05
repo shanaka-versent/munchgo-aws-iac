@@ -7,12 +7,13 @@
 #
 # What it does:
 #   1. Triggers all 6 microservice CI workflows to build and push images to ECR
-#   2. Triggers SPA build + deploy to S3 + CloudFront invalidation
-#   3. Waits for CI workflows to complete (~5-8 min)
+#   2. Triggers SPA build + deploy to S3 + CloudFront invalidation + E2E tests
+#   3. Waits for microservice CI workflows to complete (~5-8 min)
+#   3b. Waits for SPA deployment to complete (~5-10 min)
 #   4. Waits for K8s pod rollouts to finish
 #   5. Seeds admin user (Cognito + auth-service DB)
 #   6. Seeds demo data (restaurants + menus) — skip with --skip-seed-data
-#   7. Runs smoke tests on all service health endpoints
+#   7. Runs smoke tests on SPA and all service endpoints
 #
 # Prerequisites:
 #   - 03-post-terraform-setup.sh completed (infra configured)
@@ -122,14 +123,12 @@ trigger_microservices_ci() {
 
     log "Step 2: Triggering SPA deployment..."
     local SPA_REPO="shanaka-versent/munchgo-spa"
-    # SPA workflow requires a push to main (no workflow_dispatch trigger).
-    # Use gh api to trigger repository_dispatch instead, or push a no-op commit.
     if gh workflow run deploy.yml -R "$SPA_REPO" --ref main 2>/dev/null; then
         info "  Triggered: munchgo-spa deploy.yml"
         TRIGGERED=$((TRIGGERED + 1))
     else
-        warn "  SPA workflow has no workflow_dispatch trigger — push to munchgo-spa main to deploy"
-        warn "  Or run: cd munchgo-spa && git commit --allow-empty -m 'trigger deploy' && git push"
+        warn "  Failed to trigger SPA deploy — ensure deploy.yml has workflow_dispatch trigger"
+        warn "  Fallback: cd munchgo-spa && git commit --allow-empty -m 'trigger deploy' && git push"
     fi
 
     info "  ${TRIGGERED} workflows triggered"
@@ -222,6 +221,56 @@ wait_for_ci_completion() {
 }
 
 # ---------------------------------------------------------------------------
+# Wait for SPA deployment to complete
+# ---------------------------------------------------------------------------
+# Polls the SPA CI workflow until it completes (build + deploy + E2E).
+# ---------------------------------------------------------------------------
+wait_for_spa_deployment() {
+    log "Step 3b: Waiting for SPA deployment..."
+
+    local SPA_REPO="shanaka-versent/munchgo-spa"
+    local TIMEOUT=600  # 10 minutes (build + deploy + E2E)
+    local INTERVAL=30
+    local ELAPSED=0
+
+    # Wait for workflow to register
+    sleep 10
+
+    while [[ $ELAPSED -lt $TIMEOUT ]]; do
+        local STATUS
+        STATUS=$(gh run list --workflow="deploy.yml" -R "$SPA_REPO" --limit 1 \
+            --created ">=${TRIGGER_TIME}" \
+            --json status,conclusion \
+            --jq '.[0] | if .status == "completed" then .conclusion else .status end' 2>/dev/null || echo "pending")
+
+        if [[ -z "$STATUS" ]]; then
+            STATUS="pending"
+        fi
+
+        case "$STATUS" in
+            success)
+                info "  SPA deployment completed successfully"
+                return
+                ;;
+            failure)
+                warn "  SPA deployment failed"
+                warn "  Check: gh run list -R $SPA_REPO"
+                return
+                ;;
+            *)
+                echo -e "  [${ELAPSED}s/${TIMEOUT}s] SPA deploy: ⏳ (${STATUS})"
+                ;;
+        esac
+
+        sleep "$INTERVAL"
+        ELAPSED=$((ELAPSED + INTERVAL))
+    done
+
+    warn "SPA deployment wait timed out after ${TIMEOUT}s"
+    warn "Check: gh run list -R $SPA_REPO"
+}
+
+# ---------------------------------------------------------------------------
 # Wait for K8s pod rollouts
 # ---------------------------------------------------------------------------
 # Waits for all MunchGo deployments to finish rolling out after ArgoCD syncs
@@ -308,8 +357,9 @@ run_smoke_tests() {
     # Endpoints: path|name|accept_codes
     # 200 = public endpoint responding
     # 401 = OIDC plugin active (service alive, auth required)
-    # 500 = auth service has no /health endpoint but is alive (Spring returns 500 for unknown paths)
+    # 500 = auth service has no root endpoint but is alive (Spring returns 500 for unknown paths)
     local ENDPOINTS=(
+        "/|SPA (index.html)|200"
         "/healthz|Platform Health|200"
         "/api/v1/auth|Auth Service|200,500"
         "/api/v1/consumers|Consumer Service|200,401"
@@ -384,6 +434,7 @@ main() {
     read_terraform_outputs
     trigger_microservices_ci
     wait_for_ci_completion
+    wait_for_spa_deployment
     wait_for_pod_rollouts
     seed_admin_user
     seed_demo_data

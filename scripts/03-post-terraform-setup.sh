@@ -744,27 +744,41 @@ update_github_variables() {
 
     local SPA_REPO="shanaka-versent/munchgo-spa"
 
-    # CloudFront URL
+    # CloudFront URL (variable — SPA E2E tests read from vars.CLOUDFRONT_URL)
     if [[ -n "$APP_URL" ]]; then
         gh variable set CLOUDFRONT_URL --body "$APP_URL" -R "$SPA_REPO" 2>/dev/null && \
             info "  ${SPA_REPO}: CLOUDFRONT_URL → ${APP_URL}" || \
             warn "  Failed to update CLOUDFRONT_URL in $SPA_REPO"
     fi
 
-    # CloudFront Distribution ID
+    # AWS Role ARN for SPA deploy (secret — OIDC role for S3/CloudFront access)
+    local SPA_ROLE_ARN
+    SPA_ROLE_ARN=$(cd "$TERRAFORM_DIR" && terraform output -raw spa_deploy_role_arn 2>/dev/null || echo "")
+    if [[ -n "$SPA_ROLE_ARN" ]]; then
+        gh secret set AWS_ROLE_ARN --body "$SPA_ROLE_ARN" -R "$SPA_REPO" 2>/dev/null && \
+            info "  ${SPA_REPO}: AWS_ROLE_ARN → ${SPA_ROLE_ARN}" || \
+            warn "  Failed to update AWS_ROLE_ARN in $SPA_REPO"
+    fi
+
+    # AWS Region (secret)
+    gh secret set AWS_REGION --body "${AWS_REGION:-ap-southeast-2}" -R "$SPA_REPO" 2>/dev/null && \
+        info "  ${SPA_REPO}: AWS_REGION → ${AWS_REGION:-ap-southeast-2}" || \
+        warn "  Failed to update AWS_REGION in $SPA_REPO"
+
+    # CloudFront Distribution ID (secret — SPA workflow reads from secrets.CLOUDFRONT_DISTRIBUTION_ID)
     local CF_DIST_ID
     CF_DIST_ID=$(cd "$TERRAFORM_DIR" && terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
     if [[ -n "$CF_DIST_ID" ]]; then
-        gh variable set CLOUDFRONT_DISTRIBUTION_ID --body "$CF_DIST_ID" -R "$SPA_REPO" 2>/dev/null && \
+        gh secret set CLOUDFRONT_DISTRIBUTION_ID --body "$CF_DIST_ID" -R "$SPA_REPO" 2>/dev/null && \
             info "  ${SPA_REPO}: CLOUDFRONT_DISTRIBUTION_ID → ${CF_DIST_ID}" || \
             warn "  Failed to update CLOUDFRONT_DISTRIBUTION_ID in $SPA_REPO"
     fi
 
-    # SPA Bucket Name
+    # SPA Bucket Name (secret — SPA workflow reads from secrets.SPA_BUCKET_NAME)
     local SPA_BUCKET
     SPA_BUCKET=$(cd "$TERRAFORM_DIR" && terraform output -raw spa_bucket_name 2>/dev/null || echo "")
     if [[ -n "$SPA_BUCKET" ]]; then
-        gh variable set SPA_BUCKET_NAME --body "$SPA_BUCKET" -R "$SPA_REPO" 2>/dev/null && \
+        gh secret set SPA_BUCKET_NAME --body "$SPA_BUCKET" -R "$SPA_REPO" 2>/dev/null && \
             info "  ${SPA_REPO}: SPA_BUCKET_NAME → ${SPA_BUCKET}" || \
             warn "  Failed to update SPA_BUCKET_NAME in $SPA_REPO"
     fi
