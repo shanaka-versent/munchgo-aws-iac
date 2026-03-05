@@ -140,6 +140,32 @@ get_gateway_endpoint() {
 }
 
 # ---------------------------------------------------------------------------
+# Generate TLS certificates for Istio Gateway HTTPS listener
+# ---------------------------------------------------------------------------
+# Creates a self-signed CA + server certificate and the K8s TLS secret
+# referenced by the Gateway HTTPS listener (port 443).
+# Without this secret, the NLB port 443 target is unhealthy and
+# CloudFront → Kong traffic fails.
+# ---------------------------------------------------------------------------
+generate_gateway_tls() {
+    log "Generating TLS certificates for Istio Gateway..."
+
+    local CERT_SCRIPT="${SCRIPT_DIR}/01-generate-certs.sh"
+    if [[ ! -f "$CERT_SCRIPT" ]]; then
+        warn "Certificate script not found: $CERT_SCRIPT"
+        return
+    fi
+
+    # Check if secret already exists
+    if kubectl get secret istio-gateway-tls -n istio-ingress &>/dev/null; then
+        info "  TLS secret 'istio-gateway-tls' already exists — skipping"
+        return
+    fi
+
+    bash "$CERT_SCRIPT" || warn "TLS cert generation failed — run manually: ./scripts/01-generate-certs.sh"
+}
+
+# ---------------------------------------------------------------------------
 # Populate kong.yaml placeholders
 # ---------------------------------------------------------------------------
 populate_kong_yaml() {
@@ -791,6 +817,7 @@ main() {
     create_argocd_repo_credentials
     verify_vpc_routes
     get_gateway_endpoint
+    generate_gateway_tls
     populate_kong_yaml
     populate_external_secrets
     populate_eso_irsa

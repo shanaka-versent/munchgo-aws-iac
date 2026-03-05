@@ -933,6 +933,7 @@ Configures all infrastructure after `terraform apply` — idempotent, safe to re
 | **Discover Kong proxy domain** | Queries Konnect API for CP endpoint prefix, constructs proxy domain, updates `terraform.tfvars`, runs targeted `terraform apply` for CloudFront |
 | **ArgoCD repo credentials** | Creates credential template secret for private `munchgo-k8s-config` repo (uses `ARGOCD_GH_TOKEN` from `.env`) |
 | **VPC route verification** | Checks AWS route tables for Kong CIDR route, recreates via `terraform apply -replace` if missing |
+| **Gateway TLS certificates** | Generates self-signed CA + server cert and creates `istio-gateway-tls` K8s secret for the Istio Gateway HTTPS listener (port 443) — required for Kong → NLB connectivity |
 | **Service databases** | Creates PostgreSQL databases for all 6 microservices on RDS |
 | **Kafka config secret** | Creates K8s secret from MSK bootstrap brokers |
 | **Kong route sync** | Syncs routes/services/plugins to Konnect via `deck gateway sync` |

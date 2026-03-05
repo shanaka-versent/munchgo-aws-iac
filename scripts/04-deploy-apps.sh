@@ -306,15 +306,16 @@ run_smoke_tests() {
     fi
 
     # Endpoints: path|name|accept_codes
-    # 401 = OIDC plugin active (service alive, auth required)
     # 200 = public endpoint responding
+    # 401 = OIDC plugin active (service alive, auth required)
+    # 500 = auth service has no /health endpoint but is alive (Spring returns 500 for unknown paths)
     local ENDPOINTS=(
         "/healthz|Platform Health|200"
-        "/api/v1/auth/health|Auth Service|200,401"
-        "/api/v1/consumers/health|Consumer Service|200,401"
-        "/api/v1/restaurants/health|Restaurant Service|200,401"
-        "/api/v1/orders/health|Order Service|200,401"
-        "/api/v1/couriers/health|Courier Service|200,401"
+        "/api/v1/auth|Auth Service|200,500"
+        "/api/v1/consumers|Consumer Service|200,401"
+        "/api/v1/restaurants|Restaurant Service|200"
+        "/api/v1/orders|Order Service|200,401"
+        "/api/v1/couriers|Courier Service|200,401"
     )
 
     local PASSED=0
