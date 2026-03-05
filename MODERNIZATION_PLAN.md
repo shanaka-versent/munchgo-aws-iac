@@ -563,8 +563,10 @@ Create automation scripts in each IaC repo:
 
 - `01-generate-certs.sh` — generate self-signed CA + TLS cert for Istio Gateway
 - `02-setup-cloud-gateway.sh` — provision Kong Konnect, configure Transit Gateway/VNet Peering
-- `03-post-terraform-setup.sh` — replace placeholder values, sync Kong deck config
-- `04-seed-admin-user.sh` — create admin user in Cognito/AD B2C
+- `03-post-terraform-setup.sh` — infrastructure config (placeholders, Kong sync, VPC routes)
+- `04-deploy-apps.sh` — application deployment (CI triggers, seeding, smoke tests)
+- `seed-admin-user.sh` — create admin user in Cognito (helper, called by 04)
+- `seed-demo-data.sh` — seed demo restaurants + menus (helper, called by 04)
 - `destroy.sh` — ordered teardown
 
 ---
