@@ -5,12 +5,19 @@
 # Run this script AFTER 'terraform apply' AND after ArgoCD has synced
 # (Istio Gateway created the internal NLB).
 #
+# Scope: Infrastructure configuration ONLY (idempotent, safe to re-run).
+# Application deployment (CI triggers, seeding, testing) is handled by
+# 04-deploy-apps.sh — run that script after this one completes.
+#
 # What it does:
 #   1. Reads Terraform outputs (VPC, TGW, Cognito, RDS secrets)
-#   2. Waits for the Istio Gateway NLB to be provisioned
-#   3. Auto-populates ALL placeholders in kong.yaml, ExternalSecrets, and K8s overlays
-#   4. Creates service databases, Kafka secret, and seeds admin user
-#   5. Syncs Kong routes to Konnect via decK (requires KONNECT_TOKEN in .env)
+#   2. Auto-discovers Kong proxy domain and updates CloudFront origin
+#   3. Configures ArgoCD credentials and verifies VPC routes
+#   4. Waits for the Istio Gateway NLB to be provisioned
+#   5. Auto-populates ALL placeholders in kong.yaml, ExternalSecrets, and K8s overlays
+#   6. Creates service databases and Kafka secret (infra prerequisites)
+#   7. Syncs Kong routes to Konnect via decK (requires KONNECT_TOKEN in .env)
+#   8. Updates GitHub CI/CD variables for downstream workflows
 #
 # Usage:
 #   ./scripts/03-post-terraform-setup.sh
@@ -519,19 +526,6 @@ create_konnect_token_secret() {
 }
 
 # ---------------------------------------------------------------------------
-# Seed default admin user
-# ---------------------------------------------------------------------------
-seed_admin_user() {
-    local SEED_SCRIPT="${SCRIPT_DIR}/04-seed-admin-user.sh"
-    if [[ -f "$SEED_SCRIPT" ]]; then
-        log "Seeding default admin user..."
-        bash "$SEED_SCRIPT" || warn "Admin seed script failed — run manually: ./scripts/04-seed-admin-user.sh"
-    else
-        warn "Admin seed script not found: $SEED_SCRIPT"
-    fi
-}
-
-# ---------------------------------------------------------------------------
 # Auto-discover Kong Cloud Gateway proxy domain
 # ---------------------------------------------------------------------------
 # The proxy domain changes on every rebuild. It follows the pattern:
@@ -751,82 +745,33 @@ update_github_variables() {
 }
 
 # ---------------------------------------------------------------------------
-# Trigger microservices CI to push images to ECR
-# ---------------------------------------------------------------------------
-# After a rebuild, ECR repos are empty (force_delete on destroy). This
-# triggers all 6 microservice CI workflows to build and push images.
-# ---------------------------------------------------------------------------
-trigger_microservices_ci() {
-    if ! command -v gh &>/dev/null; then
-        warn "gh CLI not found — cannot trigger microservices CI"
-        warn "Trigger manually for each service:"
-        warn "  gh workflow run <service>.yml -R shanaka-versent/munchgo-microservices --ref main"
-        return
-    fi
-
-    if ! gh auth status &>/dev/null; then
-        warn "gh CLI not authenticated — skipping CI trigger"
-        return
-    fi
-
-    log "Triggering microservices CI to push images to ECR..."
-
-    local MICRO_REPO="shanaka-versent/munchgo-microservices"
-    local SERVICES=(
-        "auth-service"
-        "consumer-service"
-        "courier-service"
-        "order-service"
-        "restaurant-service"
-        "saga-orchestrator"
-    )
-
-    for svc in "${SERVICES[@]}"; do
-        if gh workflow run "${svc}.yml" -R "$MICRO_REPO" --ref main 2>/dev/null; then
-            info "  Triggered: ${svc}.yml"
-        else
-            warn "  Failed to trigger ${svc}.yml — may need manual trigger"
-        fi
-    done
-
-    log "Triggering SPA deployment..."
-    local SPA_REPO="shanaka-versent/munchgo-spa"
-    if gh workflow run deploy.yml -R "$SPA_REPO" --ref main 2>/dev/null; then
-        info "  Triggered: munchgo-spa deploy.yml"
-    else
-        warn "  Failed to trigger SPA deploy — may need manual trigger"
-    fi
-}
-
-# ---------------------------------------------------------------------------
 # Show next steps
 # ---------------------------------------------------------------------------
 show_next_steps() {
     echo ""
     echo "=========================================="
-    echo "  Post-Deployment Setup Complete"
+    echo "  Infrastructure Configuration Complete"
     echo "=========================================="
     echo ""
-    echo "  Automated steps completed:"
+    echo "  Completed:"
     echo "    - Kong proxy domain discovered and CloudFront updated"
     echo "    - ArgoCD repository credentials configured"
     echo "    - VPC routes verified"
     echo "    - Config placeholders populated (kong.yaml, ExternalSecrets)"
     echo "    - Service databases created"
     echo "    - Kong routes synced to Konnect"
-    echo "    - Admin user seeded"
+    echo "    - Konnect analytics secret configured"
     echo "    - GitHub CI/CD variables updated"
-    echo "    - Microservices CI triggered (images pushing to ECR)"
     echo ""
-    echo "  Wait for CI to complete (~5 min), then verify:"
-    if [[ -n "$APP_URL" ]]; then
-        echo "    curl ${APP_URL}/healthz"
-        echo "    curl ${APP_URL}/api/v1/auth/health"
-    fi
+    echo "  Next step — deploy applications:"
+    echo "    ./scripts/04-deploy-apps.sh"
     echo ""
-    echo "  Optional:"
-    echo "    ./scripts/05-seed-demo-data.sh    # Seed demo restaurants + menus"
-    echo "    ./scripts/02-generate-jwt.sh      # Generate test token"
+    echo "  This will:"
+    echo "    - Trigger all 6 microservice CI workflows (ECR push)"
+    echo "    - Trigger SPA build + deploy to S3"
+    echo "    - Wait for CI completion and pod rollouts"
+    echo "    - Seed admin user and demo data"
+    echo "    - Run smoke tests on all endpoints"
     echo ""
 }
 
@@ -856,9 +801,7 @@ main() {
     sync_kong_config
     get_konnect_cp_id
     create_konnect_token_secret
-    seed_admin_user
     update_github_variables
-    trigger_microservices_ci
     show_next_steps
 }
 

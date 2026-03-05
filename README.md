@@ -502,7 +502,7 @@ APPROVAL_PENDING → APPROVED → ACCEPTED → PREPARING → READY_FOR_PICKUP �
 APPROVED → CANCELLED (customer only)
 ```
 
-**Default admin user** (seeded automatically by `scripts/04-seed-admin-user.sh`):
+**Default admin user** (seeded automatically by `scripts/04-deploy-apps.sh`):
 
 | Field | Value |
 |-------|-------|
@@ -774,7 +774,7 @@ The Insomnia collection runs automatically via GitHub Actions ([`.github/workflo
 
 ## Deployment
 
-Eight steps, zero manual console clicks. Terraform handles infrastructure in two phases (CloudFront depends on the Kong proxy URL from Step 5). ArgoCD syncs K8s resources. Scripts automate Konnect + Cognito setup and all config placeholder population.
+Eight steps (six infra + two app deploy), zero manual console clicks. Terraform handles infrastructure in two phases (CloudFront depends on the Kong proxy URL from Step 5). ArgoCD syncs K8s resources. Scripts automate Konnect + Cognito setup and all config placeholder population.
 
 ```mermaid
 graph TB
@@ -908,13 +908,13 @@ This looks up the existing control plane and network (created by Terraform), sha
 
 > **`KONNECT_CP_ID` is zero-touch** — Terraform writes it to state. `03-post-terraform-setup.sh` reads it from `terraform output konnect_control_plane_id` automatically.
 
-### Step 6: Post-Deployment Automation
+### Step 6: Infrastructure Configuration
 
 ```bash
 ./scripts/03-post-terraform-setup.sh
 ```
 
-This single script handles **everything** after `terraform apply` — no manual steps required:
+Configures all infrastructure after `terraform apply` — idempotent, safe to re-run:
 
 **Config placeholder population:**
 
@@ -933,16 +933,34 @@ This single script handles **everything** after `terraform apply` — no manual 
 | **Discover Kong proxy domain** | Queries Konnect API for CP endpoint prefix, constructs proxy domain, updates `terraform.tfvars`, runs targeted `terraform apply` for CloudFront |
 | **ArgoCD repo credentials** | Creates credential template secret for private `munchgo-k8s-config` repo (uses `ARGOCD_GH_TOKEN` from `.env`) |
 | **VPC route verification** | Checks AWS route tables for Kong CIDR route, recreates via `terraform apply -replace` if missing |
+| **Service databases** | Creates PostgreSQL databases for all 6 microservices on RDS |
 | **Kafka config secret** | Creates K8s secret from MSK bootstrap brokers |
 | **Kong route sync** | Syncs routes/services/plugins to Konnect via `deck gateway sync` |
 | **Konnect token secret** | Creates `konnect-token` K8s secret for the analytics exporter CronJob |
-| **Admin user seeding** | Creates `admin@munchgo.com` / `Admin@123` in Cognito and auth-service database |
 | **GitHub CI/CD variables** | Updates `CLOUDFRONT_URL`, `CLOUDFRONT_DISTRIBUTION_ID`, `SPA_BUCKET_NAME` in `munchgo-spa` repo |
-| **Microservices CI trigger** | Triggers all 6 microservice CI workflows + SPA deploy to push images to ECR |
 
-> **CloudFront is mandatory** — WAF rules protect against OWASP Top 10, bot traffic, and DDoS. The CloudFront→Kong origin uses mTLS to prevent bypassing edge security. The proxy domain is auto-discovered — no manual Konnect UI lookup needed.
+> **CloudFront is mandatory** — WAF rules protect against OWASP Top 10, bot traffic, and DDoS. The CloudFront→Kong origin uses a custom header to prevent bypassing edge security. The proxy domain is auto-discovered — no manual Konnect UI lookup needed.
 
-### Step 7: Commit & Push Populated Config
+### Step 7: Application Deployment & Testing
+
+```bash
+./scripts/04-deploy-apps.sh                # Full deploy + seed + test
+./scripts/04-deploy-apps.sh --skip-seed-data  # Skip demo data seeding
+```
+
+Deploys all applications and validates the stack end-to-end:
+
+| Task | What it does |
+|------|-------------|
+| **Trigger microservices CI** | Dispatches all 6 microservice CI workflows to build and push images to ECR |
+| **Trigger SPA deploy** | Dispatches SPA build + S3 deploy + CloudFront invalidation |
+| **Wait for CI completion** | Polls GitHub Actions until all workflows finish (~5-8 min) |
+| **Wait for pod rollouts** | Monitors K8s deployment rollouts after ArgoCD syncs |
+| **Seed admin user** | Creates `admin@munchgo.com` / `Admin@123` in Cognito and auth-service database |
+| **Seed demo data** | Populates restaurants and menus via API (optional, skip with `--skip-seed-data`) |
+| **Smoke tests** | Curls all service health endpoints via CloudFront, reports pass/fail |
+
+### Step 8: Commit & Push Populated Config
 
 ```bash
 git add deck/kong.yaml k8s/external-secrets/ insomnia/munchgo-api.json

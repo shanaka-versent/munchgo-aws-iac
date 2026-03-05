@@ -13,10 +13,10 @@
 #
 # Prerequisites:
 #   - Stack deployed (CloudFront + Kong + services running)
-#   - Admin user seeded (04-seed-admin-user.sh)
+#   - Admin user seeded (seed-admin-user.sh)
 #
 # Usage:
-#   ./scripts/05-seed-demo-data.sh
+#   ./scripts/seed-demo-data.sh
 
 set -euo pipefail
 
@@ -60,7 +60,7 @@ login_admin() {
     LOGIN_RESPONSE=$(curl -sf -X POST "${APP_URL}/api/v1/auth/login" \
         -H "Content-Type: application/json" \
         -d '{"email":"admin@munchgo.com","password":"Admin@123"}' 2>&1) || {
-        error "Login failed. Make sure the admin user is seeded (04-seed-admin-user.sh)."
+        error "Login failed. Make sure the admin user is seeded (seed-admin-user.sh)."
         error "Response: $LOGIN_RESPONSE"
         exit 1
     }

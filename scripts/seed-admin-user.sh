@@ -18,7 +18,7 @@
 #   - AWS CLI configured with appropriate permissions
 #
 # Usage:
-#   ./scripts/04-seed-admin-user.sh
+#   ./scripts/seed-admin-user.sh
 
 set -euo pipefail
 
@@ -188,7 +188,7 @@ seed_auth_database() {
 
         if ! kubectl get secret munchgo-db-master -n munchgo &>/dev/null; then
             warn "munchgo-db-master secret not found after ${MAX_WAIT}s — skipping DB seed"
-            warn "Run manually after ExternalSecrets syncs: ./scripts/04-seed-admin-user.sh"
+            warn "Run manually after ExternalSecrets syncs: ./scripts/seed-admin-user.sh"
             return
         fi
     fi
