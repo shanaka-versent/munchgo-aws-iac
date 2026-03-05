@@ -416,13 +416,31 @@ delete_konnect_resources() {
 
         # Destroy in dependency order: config first (references both CP and network),
         # then network (triggers TGW detachment from Kong's side), then CP.
+        #
+        # The DP group config MUST be fully deleted before the network can be removed.
+        # Konnect API returns 400 if the network still has DP group references.
         cd "$tf_dir"
-        terraform destroy -target='konnect_cloud_gateway_configuration.munchgo[0]' $tf_args 2>/dev/null || \
+
+        # Step 1: Delete DP group config (references both CP and network)
+        log "  Deleting Cloud Gateway configuration (DP group)..."
+        terraform destroy -target='konnect_cloud_gateway_configuration.munchgo[0]' $tf_args || \
             warn "  Config destroy returned non-zero (may already be gone)"
-        terraform destroy -target='konnect_cloud_gateway_network.munchgo[0]' $tf_args 2>/dev/null || \
+
+        # Wait for Konnect to fully release the DP group reference from the network.
+        # Without this, the network delete gets a 400 "non-zero count of data-plane groups".
+        log "  Waiting 30s for Konnect to release DP group references..."
+        sleep 30
+
+        # Step 2: Delete network (triggers TGW detachment from Kong's side)
+        log "  Deleting Cloud Gateway network..."
+        terraform destroy -target='konnect_cloud_gateway_network.munchgo[0]' $tf_args || \
             warn "  Network destroy returned non-zero (may already be gone)"
-        terraform destroy -target='konnect_gateway_control_plane.munchgo[0]' $tf_args 2>/dev/null || \
+
+        # Step 3: Delete control plane
+        log "  Deleting Gateway control plane..."
+        terraform destroy -target='konnect_gateway_control_plane.munchgo[0]' $tf_args || \
             warn "  Control plane destroy returned non-zero (may already be gone)"
+
         cd "$REPO_DIR"
 
         log "  Konnect resources removed from Terraform state."
