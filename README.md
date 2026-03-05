@@ -574,12 +574,26 @@ GitHub Actions authenticates via OIDC federation — no stored AWS credentials.
 |-----------------|------|-------|---------|
 | `AWS_ACCOUNT_ID` | Secret | Your AWS account ID | ECR registry URL |
 | `AWS_REGION` | Secret | `ap-southeast-2` | ECR region |
-| `AWS_ROLE_ARN` | Secret | `arn:aws:iam::<account>:role/role-spa-deploy-kong-gw-poc` | OIDC federation |
+| `AWS_ROLE_ARN` | Secret | `arn:aws:iam::<account>:role/role-spa-deploy-kong-gw-poc` | OIDC federation (shared role) |
 | `GITOPS_TOKEN` | Secret | GitHub PAT with `repo` scope on `munchgo-k8s-config` | GitOps updates + cross-repo dispatch |
 | `AZURE_CLIENT_ID` | Secret | Azure AD app client ID (optional) | ACR sync via OIDC |
 | `AZURE_TENANT_ID` | Secret | Azure AD tenant ID (optional) | ACR sync via OIDC |
 | `AZURE_SUBSCRIPTION_ID` | Secret | Azure subscription ID (optional) | ACR sync via OIDC |
 | `AZURE_ACR_NAME` | Variable | ACR name, e.g. `munchgoacr` (optional) | Conditional ACR sync |
+
+**`munchgo-spa` repo** (auto-updated by `03-post-terraform-setup.sh`):
+
+| Secret/Variable | Type | Value | Used By |
+|-----------------|------|-------|---------|
+| `AWS_ROLE_ARN` | Secret | `arn:aws:iam::<account>:role/role-spa-deploy-kong-gw-poc` | S3 upload + CloudFront invalidation |
+| `AWS_REGION` | Secret | `ap-southeast-2` | AWS region |
+| `SPA_BUCKET_NAME` | Secret | S3 bucket name (auto-populated) | `aws s3 sync` target |
+| `CLOUDFRONT_DISTRIBUTION_ID` | Secret | CloudFront dist ID (auto-populated) | Cache invalidation |
+| `CLOUDFRONT_URL` | Variable | `https://<dist>.cloudfront.net` (auto-populated) | E2E test base URL |
+| `ADMIN_EMAIL` | Secret | `admin@munchgo.com` | E2E login tests |
+| `ADMIN_PASSWORD` | Secret | Admin password | E2E login tests |
+
+> **Zero-touch after rebuild:** `03-post-terraform-setup.sh` automatically updates all SPA secrets and variables from Terraform outputs. No manual GitHub UI updates needed.
 
 **`munchgo-aws-iac` repo** (required for post-deployment tests and Terraform Konnect IaC):
 
@@ -707,7 +721,7 @@ flowchart TB
 
 An [Insomnia](https://insomnia.rest/) collection is included at [`insomnia/munchgo-api.json`](insomnia/munchgo-api.json) with **49+ requests** covering all MunchGo API endpoints.
 
-**Import:** Open Insomnia → **Import** → select `insomnia/munchgo-api.json`. The `base_url` is auto-populated by the deployment scripts (see [Step 6](#step-6-populate-config-placeholders)).
+**Import:** Open Insomnia → **Import** → select `insomnia/munchgo-api.json`. The `base_url` is auto-populated by the deployment scripts (see [Step 5](#step-5-infrastructure-configuration)).
 
 **One-Click Test — Collection Runner:**
 
@@ -774,7 +788,7 @@ The Insomnia collection runs automatically via GitHub Actions ([`.github/workflo
 
 ## Deployment
 
-Eight steps (six infra + two app deploy), zero manual console clicks. Terraform handles infrastructure in two phases (CloudFront depends on the Kong proxy URL from Step 5). ArgoCD syncs K8s resources. Scripts automate Konnect + Cognito setup and all config placeholder population.
+Seven steps (five infra + two app deploy), zero manual console clicks. Terraform handles infrastructure in two phases (CloudFront depends on the Kong proxy URL from Step 4). ArgoCD syncs K8s resources. Scripts automate Konnect + Cognito setup, TLS certificate generation, config placeholder population, GitHub CI/CD secrets, and full application deployment with E2E validation.
 
 ```mermaid
 graph TB
@@ -872,7 +886,7 @@ terraform -chdir=terraform apply
 
 Creates **all layers in one shot:**
 - **AWS infrastructure:** VPC, EKS cluster + node groups, AWS LB Controller, Transit Gateway + RAM share, ECR (6 repos), MSK (Kafka), RDS (PostgreSQL), S3 (SPA bucket), Amazon Cognito (User Pool, App Client, Groups, Pre Token Lambda, Secrets Manager)
-- **Kong Konnect (IaC):** Control plane `MunchGo`, Cloud Gateway Network, and Data Plane Group — managed declaratively via the `kong/konnect` Terraform provider ([terraform/konnect.tf](terraform/konnect.tf)). The CP ID is written to Terraform state and surfaced as `terraform output konnect_control_plane_id`. Transit Gateway attachment requires the network to reach `ready` state (~30 min) and runs separately in Step 5.
+- **Kong Konnect (IaC):** Control plane `MunchGo`, Cloud Gateway Network, and Data Plane Group — managed declaratively via the `kong/konnect` Terraform provider ([terraform/konnect.tf](terraform/konnect.tf)). The CP ID is written to Terraform state and surfaced as `terraform output konnect_control_plane_id`. Transit Gateway attachment requires the network to reach `ready` state (~30 min) and runs separately in Step 4.
 - **GitOps:** ArgoCD + root application (App of Apps bootstrapped automatically)
 
 ArgoCD immediately begins syncing all Layer 3 child apps via sync waves. The `09-munchgo-apps.yaml` bridge (wave 8) discovers Layer 4 service Applications from the `munchgo-k8s-config` GitOps repo.
@@ -888,15 +902,7 @@ aws eks update-kubeconfig \
   --profile your-aws-profile
 ```
 
-### Step 4: Generate TLS Certificates
-
-```bash
-./scripts/01-generate-certs.sh
-```
-
-Generates a self-signed CA + server certificate and creates the `istio-gateway-tls` Kubernetes secret automatically.
-
-### Step 5: Attach Transit Gateway (after network is ready)
+### Step 4: Attach Transit Gateway (after network is ready)
 
 The Cloud Gateway Network created by `terraform apply` takes **~30 minutes** to reach `ready` state. Once ready, run the TGW attachment script — it polls the Konnect API until the network is confirmed ready then attaches automatically:
 
@@ -908,7 +914,7 @@ This looks up the existing control plane and network (created by Terraform), sha
 
 > **`KONNECT_CP_ID` is zero-touch** — Terraform writes it to state. `03-post-terraform-setup.sh` reads it from `terraform output konnect_control_plane_id` automatically.
 
-### Step 6: Infrastructure Configuration
+### Step 5: Infrastructure Configuration
 
 ```bash
 ./scripts/03-post-terraform-setup.sh
@@ -938,11 +944,11 @@ Configures all infrastructure after `terraform apply` — idempotent, safe to re
 | **Kafka config secret** | Creates K8s secret from MSK bootstrap brokers |
 | **Kong route sync** | Syncs routes/services/plugins to Konnect via `deck gateway sync` |
 | **Konnect token secret** | Creates `konnect-token` K8s secret for the analytics exporter CronJob |
-| **GitHub CI/CD variables** | Updates `CLOUDFRONT_URL`, `CLOUDFRONT_DISTRIBUTION_ID`, `SPA_BUCKET_NAME` in `munchgo-spa` repo |
+| **GitHub CI/CD secrets & variables** | Updates `AWS_ROLE_ARN`, `AWS_REGION`, `SPA_BUCKET_NAME`, `CLOUDFRONT_DISTRIBUTION_ID` (secrets) and `CLOUDFRONT_URL` (variable) in `munchgo-spa` repo — ensures SPA deploy always targets the current stack |
 
 > **CloudFront is mandatory** — WAF rules protect against OWASP Top 10, bot traffic, and DDoS. The CloudFront→Kong origin uses a custom header to prevent bypassing edge security. The proxy domain is auto-discovered — no manual Konnect UI lookup needed.
 
-### Step 7: Application Deployment & Testing
+### Step 6: Application Deployment & Testing
 
 ```bash
 ./scripts/04-deploy-apps.sh                # Full deploy + seed + test
@@ -954,14 +960,15 @@ Deploys all applications and validates the stack end-to-end:
 | Task | What it does |
 |------|-------------|
 | **Trigger microservices CI** | Dispatches all 6 microservice CI workflows to build and push images to ECR |
-| **Trigger SPA deploy** | Dispatches SPA build + S3 deploy + CloudFront invalidation |
-| **Wait for CI completion** | Polls GitHub Actions until all workflows finish (~5-8 min) |
+| **Trigger SPA deploy** | Dispatches SPA build + S3 deploy + CloudFront invalidation + E2E tests |
+| **Wait for CI completion** | Polls GitHub Actions until all microservice workflows finish (~5-8 min) |
+| **Wait for SPA deployment** | Polls SPA workflow until build + deploy + E2E completes (~5-10 min) |
 | **Wait for pod rollouts** | Monitors K8s deployment rollouts after ArgoCD syncs |
 | **Seed admin user** | Creates `admin@munchgo.com` / `Admin@123` in Cognito and auth-service database |
 | **Seed demo data** | Populates restaurants and menus via API (optional, skip with `--skip-seed-data`) |
 | **Smoke tests** | Curls all service health endpoints via CloudFront, reports pass/fail |
 
-### Step 8: Commit & Push Populated Config
+### Step 7: Commit & Push Populated Config
 
 ```bash
 git add deck/kong.yaml k8s/external-secrets/ insomnia/munchgo-api.json
@@ -978,10 +985,10 @@ export APP_URL=$(terraform -chdir=terraform output -raw application_url)
 echo "Application URL: $APP_URL"
 
 # Verify connectivity
-curl $APP_URL/healthz
-curl $APP_URL/api/v1/auth/health
+curl $APP_URL/healthz              # Platform health
+curl $APP_URL/api/v1/restaurants   # Public restaurant browsing
 
-# Test with a JWT
+# Test with a JWT (authenticated endpoints)
 ./scripts/02-generate-jwt.sh
 curl -H "Authorization: Bearer $ACCESS_TOKEN" $APP_URL/api/v1/orders
 ```
