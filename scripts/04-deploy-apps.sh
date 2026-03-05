@@ -48,6 +48,9 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error(){ echo -e "${RED}[ERROR]${NC} $*"; }
 info() { echo -e "${CYAN}[DEPLOY]${NC} $*"; }
 
+# Global: CI trigger timestamp (set by trigger_microservices_ci, used by wait_for_ci_completion)
+TRIGGER_TIME=""
+
 # Parse arguments
 SKIP_SEED_DATA=false
 for arg in "$@"; do
@@ -94,32 +97,39 @@ trigger_microservices_ci() {
     log "Step 1: Triggering microservices CI workflows..."
 
     local MICRO_REPO="shanaka-versent/munchgo-microservices"
-    local SERVICES=(
-        "auth-service"
-        "consumer-service"
-        "courier-service"
-        "order-service"
-        "restaurant-service"
-        "saga-orchestrator"
+    # Workflow filenames must match .github/workflows/ in the microservices repo
+    local WORKFLOWS=(
+        "auth-service.yml"
+        "consumer-service.yml"
+        "courier-service.yml"
+        "order-service.yml"
+        "restaurant-service.yml"
+        "order-saga-orchestrator.yml"
     )
 
+    # Record trigger time to filter CI wait (ISO 8601 UTC)
+    TRIGGER_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
     local TRIGGERED=0
-    for svc in "${SERVICES[@]}"; do
-        if gh workflow run "${svc}.yml" -R "$MICRO_REPO" --ref main 2>/dev/null; then
-            info "  Triggered: ${svc}.yml"
+    for wf in "${WORKFLOWS[@]}"; do
+        if gh workflow run "$wf" -R "$MICRO_REPO" --ref main 2>/dev/null; then
+            info "  Triggered: ${wf}"
             TRIGGERED=$((TRIGGERED + 1))
         else
-            warn "  Failed to trigger ${svc}.yml — may need manual trigger"
+            warn "  Failed to trigger ${wf} — may need manual trigger"
         fi
     done
 
     log "Step 2: Triggering SPA deployment..."
     local SPA_REPO="shanaka-versent/munchgo-spa"
+    # SPA workflow requires a push to main (no workflow_dispatch trigger).
+    # Use gh api to trigger repository_dispatch instead, or push a no-op commit.
     if gh workflow run deploy.yml -R "$SPA_REPO" --ref main 2>/dev/null; then
         info "  Triggered: munchgo-spa deploy.yml"
         TRIGGERED=$((TRIGGERED + 1))
     else
-        warn "  Failed to trigger SPA deploy — may need manual trigger"
+        warn "  SPA workflow has no workflow_dispatch trigger — push to munchgo-spa main to deploy"
+        warn "  Or run: cd munchgo-spa && git commit --allow-empty -m 'trigger deploy' && git push"
     fi
 
     info "  ${TRIGGERED} workflows triggered"
@@ -135,64 +145,70 @@ wait_for_ci_completion() {
     log "Step 3: Waiting for CI workflows to complete..."
 
     local MICRO_REPO="shanaka-versent/munchgo-microservices"
-    local SPA_REPO="shanaka-versent/munchgo-spa"
     local TIMEOUT=900  # 15 minutes
     local INTERVAL=30
     local ELAPSED=0
 
-    local SERVICES=(
-        "auth-service"
-        "consumer-service"
-        "courier-service"
-        "order-service"
-        "restaurant-service"
-        "saga-orchestrator"
+    # Workflow filenames must match trigger_microservices_ci()
+    local WORKFLOWS=(
+        "auth-service.yml"
+        "consumer-service.yml"
+        "courier-service.yml"
+        "order-service.yml"
+        "restaurant-service.yml"
+        "order-saga-orchestrator.yml"
     )
 
-    # Wait a few seconds for workflows to register
-    sleep 10
+    # Wait for workflows to register in GitHub
+    sleep 15
 
     while [[ $ELAPSED -lt $TIMEOUT ]]; do
         local ALL_DONE=true
+        local FAILED_COUNT=0
         local STATUS_LINE=""
 
-        # Check microservices workflows
-        for svc in "${SERVICES[@]}"; do
+        for wf in "${WORKFLOWS[@]}"; do
+            local svc="${wf%.yml}"
             local STATUS
-            STATUS=$(gh run list --workflow="${svc}.yml" -R "$MICRO_REPO" --limit 1 \
-                --json status,conclusion --jq '.[0] | if .status == "completed" then .conclusion else .status end' 2>/dev/null || echo "unknown")
+
+            # Only look at runs created AFTER we triggered them
+            STATUS=$(gh run list --workflow="$wf" -R "$MICRO_REPO" --limit 1 \
+                --created ">=${TRIGGER_TIME}" \
+                --json status,conclusion \
+                --jq '.[0] | if .status == "completed" then .conclusion else .status end' 2>/dev/null || echo "pending")
+
+            # If no run found after trigger time, it hasn't started yet
+            if [[ -z "$STATUS" ]]; then
+                STATUS="pending"
+            fi
 
             case "$STATUS" in
                 success)     STATUS_LINE+=" ${svc}:✓" ;;
                 failure)
-                    error "  ${svc} CI FAILED"
-                    error "  Check: gh run list --workflow=${svc}.yml -R $MICRO_REPO --limit 1"
                     STATUS_LINE+=" ${svc}:✗"
+                    FAILED_COUNT=$((FAILED_COUNT + 1))
                     ;;
-                in_progress) STATUS_LINE+=" ${svc}:⏳"; ALL_DONE=false ;;
-                queued)      STATUS_LINE+=" ${svc}:⏳"; ALL_DONE=false ;;
-                *)           STATUS_LINE+=" ${svc}:?"; ALL_DONE=false ;;
+                in_progress|queued|pending|requested|waiting)
+                    STATUS_LINE+=" ${svc}:⏳"
+                    ALL_DONE=false
+                    ;;
+                *)
+                    STATUS_LINE+=" ${svc}:⏳"
+                    ALL_DONE=false
+                    ;;
             esac
         done
 
-        # Check SPA workflow
-        local SPA_STATUS
-        SPA_STATUS=$(gh run list --workflow="deploy.yml" -R "$SPA_REPO" --limit 1 \
-            --json status,conclusion --jq '.[0] | if .status == "completed" then .conclusion else .status end' 2>/dev/null || echo "unknown")
-
-        case "$SPA_STATUS" in
-            success)     STATUS_LINE+=" spa:✓" ;;
-            failure)     STATUS_LINE+=" spa:✗"; error "  SPA deploy FAILED" ;;
-            in_progress) STATUS_LINE+=" spa:⏳"; ALL_DONE=false ;;
-            queued)      STATUS_LINE+=" spa:⏳"; ALL_DONE=false ;;
-            *)           STATUS_LINE+=" spa:?"; ALL_DONE=false ;;
-        esac
-
-        echo -e "\r  [${ELAPSED}s/${TIMEOUT}s]${STATUS_LINE}"
+        echo -e "  [${ELAPSED}s/${TIMEOUT}s]${STATUS_LINE}"
 
         if $ALL_DONE; then
             echo ""
-            info "  All CI workflows completed"
+            if [[ $FAILED_COUNT -gt 0 ]]; then
+                warn "${FAILED_COUNT} workflow(s) failed"
+                warn "Check: gh run list -R $MICRO_REPO"
+            else
+                info "  All CI workflows completed successfully"
+            fi
             return
         fi
 
@@ -202,7 +218,7 @@ wait_for_ci_completion() {
 
     echo ""
     warn "CI wait timed out after ${TIMEOUT}s — some workflows may still be running"
-    warn "Check: gh run list -R $MICRO_REPO && gh run list -R $SPA_REPO"
+    warn "Check: gh run list -R $MICRO_REPO"
 }
 
 # ---------------------------------------------------------------------------
@@ -289,26 +305,29 @@ run_smoke_tests() {
         return
     fi
 
+    # Endpoints: path|name|accept_codes
+    # 401 = OIDC plugin active (service alive, auth required)
+    # 200 = public endpoint responding
     local ENDPOINTS=(
-        "/healthz|Platform Health"
-        "/api/v1/auth/health|Auth Service"
-        "/api/v1/consumers/health|Consumer Service"
-        "/api/v1/restaurants/health|Restaurant Service"
-        "/api/v1/orders/health|Order Service"
-        "/api/v1/couriers/health|Courier Service"
+        "/healthz|Platform Health|200"
+        "/api/v1/auth/health|Auth Service|200,401"
+        "/api/v1/consumers/health|Consumer Service|200,401"
+        "/api/v1/restaurants/health|Restaurant Service|200,401"
+        "/api/v1/orders/health|Order Service|200,401"
+        "/api/v1/couriers/health|Courier Service|200,401"
     )
 
     local PASSED=0
     local FAILED=0
 
     for entry in "${ENDPOINTS[@]}"; do
-        local path="${entry%%|*}"
-        local name="${entry##*|}"
+        IFS='|' read -r path name accept_codes <<< "$entry"
         local HTTP_CODE
 
         HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${APP_URL}${path}" 2>/dev/null || echo "000")
 
-        if [[ "$HTTP_CODE" == "200" ]]; then
+        # Check if HTTP code is in the accepted list
+        if echo ",$accept_codes," | grep -q ",${HTTP_CODE},"; then
             info "  ✓ ${name} (${path}) — HTTP ${HTTP_CODE}"
             PASSED=$((PASSED + 1))
         else
