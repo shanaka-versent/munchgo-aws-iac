@@ -449,6 +449,63 @@ update_insomnia_url() {
 }
 
 # ---------------------------------------------------------------------------
+# Update SPA E2E config with current CloudFront URL
+# ---------------------------------------------------------------------------
+# After a stack rebuild, the CloudFront distribution changes.
+# This updates the hardcoded fallback URLs in:
+#   - munchgo-spa/e2e/playwright.config.ts (local E2E default)
+#   - munchgo-spa/.github/workflows/deploy.yml (CI E2E fallback)
+# so both local and CI E2E tests point to the current deployment.
+# ---------------------------------------------------------------------------
+update_spa_e2e_config() {
+    local SPA_REPO="${REPO_DIR}/../munchgo-spa"
+
+    if [[ ! -d "$SPA_REPO" ]]; then
+        warn "munchgo-spa repo not found at ${SPA_REPO} — skipping E2E config update"
+        return
+    fi
+
+    if [[ -z "$APP_URL" ]]; then
+        warn "CloudFront URL not available — skipping SPA E2E config update"
+        return
+    fi
+
+    # Extract just the domain (strip https://)
+    local CF_DOMAIN
+    CF_DOMAIN=$(echo "$APP_URL" | sed 's|https://||')
+
+    log "Updating SPA E2E config with CloudFront domain: ${CF_DOMAIN}..."
+
+    # Update playwright.config.ts default baseURL
+    local PW_CONFIG="${SPA_REPO}/e2e/playwright.config.ts"
+    if [[ -f "$PW_CONFIG" ]]; then
+        sed -i.bak "s|https://[a-z0-9]*\.cloudfront\.net|https://${CF_DOMAIN}|g" "$PW_CONFIG"
+        rm -f "${PW_CONFIG}.bak"
+        info "  playwright.config.ts → https://${CF_DOMAIN}"
+    fi
+
+    # Update deploy.yml CI fallback URLs
+    local DEPLOY_YML="${SPA_REPO}/.github/workflows/deploy.yml"
+    if [[ -f "$DEPLOY_YML" ]]; then
+        sed -i.bak "s|https://[a-z0-9]*\.cloudfront\.net|https://${CF_DOMAIN}|g" "$DEPLOY_YML"
+        rm -f "${DEPLOY_YML}.bak"
+        info "  deploy.yml → https://${CF_DOMAIN}"
+    fi
+
+    # Commit and push changes in munchgo-spa repo
+    cd "$SPA_REPO"
+    if ! git diff --quiet HEAD -- e2e/playwright.config.ts .github/workflows/deploy.yml 2>/dev/null; then
+        git add e2e/playwright.config.ts .github/workflows/deploy.yml 2>/dev/null || true
+        git commit -m "Update CloudFront URL to ${CF_DOMAIN} (post-terraform-setup)" 2>/dev/null || true
+        git push 2>/dev/null || warn "Could not push munchgo-spa changes — push manually"
+        info "  munchgo-spa changes committed and pushed"
+    else
+        info "  munchgo-spa E2E config already up to date"
+    fi
+    cd "$REPO_DIR"
+}
+
+# ---------------------------------------------------------------------------
 # Auto-resolve the Konnect control-plane ID
 # ---------------------------------------------------------------------------
 # Priority:
@@ -899,6 +956,7 @@ main() {
     populate_eso_irsa
     populate_k8s_overlay
     update_insomnia_url
+    update_spa_e2e_config
     commit_and_push_changes
     create_service_databases
     create_kafka_secret
