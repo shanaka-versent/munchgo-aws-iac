@@ -29,7 +29,7 @@ REPO_DIR="${SCRIPT_DIR}/.."
 TERRAFORM_DIR="${REPO_DIR}/terraform"
 
 # K8s config repo (relative to infra repo)
-K8S_CONFIG_REPO="${REPO_DIR}/../../Modernisation/Java-demo/munchgo-k8s-config"
+K8S_CONFIG_REPO="${REPO_DIR}/../munchgo-k8s-config"
 
 # Auto-source .env if it exists (contains KONNECT_TOKEN etc.)
 ENV_FILE="${REPO_DIR}/.env"
