@@ -823,6 +823,30 @@ show_next_steps() {
 }
 
 # ---------------------------------------------------------------------------
+# Commit and push populated config files so ArgoCD syncs the changes
+# ---------------------------------------------------------------------------
+commit_and_push_changes() {
+    cd "$REPO_DIR"
+
+    # Check if there are any changes to commit
+    if git diff --quiet HEAD -- k8s/ deck/ argocd/ insomnia/ 2>/dev/null; then
+        log "No config changes to commit — already up to date"
+        return
+    fi
+
+    log "Committing and pushing updated config files..."
+
+    git add k8s/ deck/ argocd/ insomnia/ 2>/dev/null || true
+    git commit -m "Update config with current Terraform outputs (post-terraform-setup)" 2>/dev/null || true
+    git push 2>/dev/null || {
+        warn "Could not push to remote — commit saved locally. Push manually when ready."
+        return
+    }
+
+    info "  Changes committed and pushed — ArgoCD will auto-sync"
+}
+
+# ---------------------------------------------------------------------------
 # Update kubeconfig to point to the current EKS cluster
 # ---------------------------------------------------------------------------
 update_kubeconfig() {
@@ -870,6 +894,7 @@ main() {
     populate_eso_irsa
     populate_k8s_overlay
     update_insomnia_url
+    commit_and_push_changes
     create_service_databases
     create_kafka_secret
     sync_kong_config
