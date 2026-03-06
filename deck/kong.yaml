@@ -43,34 +43,30 @@ _format_version: "3.0"
 # GLOBAL PLUGINS
 # ==============================================================================
 
-plugins:
-  # --------------------------------------------------------------------------
-  # NOTE: Prometheus plugin is NOT available on Kong Dedicated Cloud Gateway.
-  # Kong manages the data plane — use Konnect Analytics for metrics instead.
-  # --------------------------------------------------------------------------
-
-  # --------------------------------------------------------------------------
-  # CloudFront Bypass Prevention -- Custom Origin Header (Optional)
-  # --------------------------------------------------------------------------
-  # NOTE: If you're using origin mTLS (recommended), this plugin is OPTIONAL.
-  # mTLS alone prevents bypass at the TLS layer (Kong rejects connections
-  # without a valid client certificate). This header adds defense-in-depth
-  # at the application layer.
-  #
-  # To enable:
-  # 1. Uncomment the plugin below
-  # 2. Replace <YOUR_CF_ORIGIN_SECRET> with the same value used in
-  #    terraform.tfvars for cf_origin_header_value
-  # 3. Sync: deck gateway sync -s deck/kong.yaml ...
-  #
-  # - name: pre-function
-  #   config:
-  #     access:
-  #       - |
-  #         local cf_secret = kong.request.get_header("X-CF-Secret")
-  #         if cf_secret ~= "<YOUR_CF_ORIGIN_SECRET>" then
-  #           return kong.response.exit(403, { message = "Direct access not allowed" })
-  #         end
+# --------------------------------------------------------------------------
+# Global Plugins
+# --------------------------------------------------------------------------
+# NOTE: Prometheus plugin is NOT available on Kong Dedicated Cloud Gateway.
+# Kong manages the data plane — use Konnect Analytics for metrics instead.
+#
+# CloudFront Bypass Prevention -- Custom Origin Header (Optional)
+# --------------------------------------------------------------------------
+# NOTE: If you're using origin mTLS (recommended), this plugin is OPTIONAL.
+# mTLS alone prevents bypass at the TLS layer (Kong rejects connections
+# without a valid client certificate). This header adds defense-in-depth
+# at the application layer.
+#
+# To enable, add a global plugins: section:
+#
+# plugins:
+#   - name: pre-function
+#     config:
+#       access:
+#         - |
+#           local cf_secret = kong.request.get_header("X-CF-Secret")
+#           if cf_secret ~= "<YOUR_CF_ORIGIN_SECRET>" then
+#             return kong.response.exit(403, { message = "Direct access not allowed" })
+#           end
 
 # ==============================================================================
 # SERVICES & ROUTES — MunchGo Microservices
