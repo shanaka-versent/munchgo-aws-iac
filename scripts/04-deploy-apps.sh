@@ -5,15 +5,19 @@
 # Run this AFTER 03-post-terraform-setup.sh has completed.
 # Handles everything related to application deployment, seeding, and validation.
 #
-# What it does:
-#   1. Triggers all 6 microservice CI workflows to build and push images to ECR
-#   2. Triggers SPA build + deploy to S3 + CloudFront invalidation + E2E tests
-#   3. Waits for microservice CI workflows to complete (~5-8 min)
-#   3b. Waits for SPA deployment to complete (~5-10 min)
-#   4. Waits for K8s pod rollouts to finish
-#   5. Seeds admin user (Cognito + auth-service DB)
-#   6. Seeds demo data (restaurants + menus) — skip with --skip-seed-data
-#   7. Runs smoke tests on SPA and all service endpoints
+# What it does (order matters — APIs must be live before SPA E2E tests):
+#   Phase 1: Deploy APIs
+#     1. Triggers all 6 microservice CI workflows to build and push images to ECR
+#     2. Waits for microservice CI workflows to complete (~5-8 min)
+#     3. Waits for K8s pod rollouts to finish (APIs become live)
+#   Phase 2: Seed Data (requires live APIs)
+#     4. Seeds admin user (Cognito + auth-service DB)
+#     4b. Seeds demo data (restaurants + menus) — skip with --skip-seed-data
+#   Phase 3: Deploy SPA + E2E (requires live APIs + seed data)
+#     5. Triggers SPA build + deploy to S3 + CloudFront invalidation
+#     6. Waits for SPA deployment + Playwright E2E tests to complete
+#   Phase 4: Final Validation
+#     7. Runs smoke tests on SPA and all service endpoints
 #
 # Prerequisites:
 #   - 03-post-terraform-setup.sh completed (infra configured)
@@ -49,8 +53,9 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error(){ echo -e "${RED}[ERROR]${NC} $*"; }
 info() { echo -e "${CYAN}[DEPLOY]${NC} $*"; }
 
-# Global: CI trigger timestamp (set by trigger_microservices_ci, used by wait_for_ci_completion)
+# Global: CI trigger timestamps (used to filter workflow runs to only those we triggered)
 TRIGGER_TIME=""
+SPA_TRIGGER_TIME=""
 
 # Parse arguments
 SKIP_SEED_DATA=false
@@ -121,17 +126,7 @@ trigger_microservices_ci() {
         fi
     done
 
-    log "Step 2: Triggering SPA deployment..."
-    local SPA_REPO="shanaka-versent/munchgo-spa"
-    if gh workflow run deploy.yml -R "$SPA_REPO" --ref main 2>/dev/null; then
-        info "  Triggered: munchgo-spa deploy.yml"
-        TRIGGERED=$((TRIGGERED + 1))
-    else
-        warn "  Failed to trigger SPA deploy — ensure deploy.yml has workflow_dispatch trigger"
-        warn "  Fallback: cd munchgo-spa && git commit --allow-empty -m 'trigger deploy' && git push"
-    fi
-
-    info "  ${TRIGGERED} workflows triggered"
+    info "  ${TRIGGERED} microservice workflows triggered"
 }
 
 # ---------------------------------------------------------------------------
@@ -141,7 +136,7 @@ trigger_microservices_ci() {
 # Timeout: 15 minutes (microservice builds typically take 5-8 minutes).
 # ---------------------------------------------------------------------------
 wait_for_ci_completion() {
-    log "Step 3: Waiting for CI workflows to complete..."
+    log "Step 2: Waiting for microservice CI workflows to complete..."
 
     local MICRO_REPO="shanaka-versent/munchgo-microservices"
     local TIMEOUT=900  # 15 minutes
@@ -226,7 +221,7 @@ wait_for_ci_completion() {
 # Polls the SPA CI workflow until it completes (build + deploy + E2E).
 # ---------------------------------------------------------------------------
 wait_for_spa_deployment() {
-    log "Step 3b: Waiting for SPA deployment..."
+    log "Step 6: Waiting for SPA deployment + E2E tests..."
 
     local SPA_REPO="shanaka-versent/munchgo-spa"
     local TIMEOUT=600  # 10 minutes (build + deploy + E2E)
@@ -239,7 +234,7 @@ wait_for_spa_deployment() {
     while [[ $ELAPSED -lt $TIMEOUT ]]; do
         local STATUS
         STATUS=$(gh run list --workflow="deploy.yml" -R "$SPA_REPO" --limit 1 \
-            --created ">=${TRIGGER_TIME}" \
+            --created ">=${SPA_TRIGGER_TIME}" \
             --json status,conclusion \
             --jq '.[0] | if .status == "completed" then .conclusion else .status end' 2>/dev/null || echo "pending")
 
@@ -277,7 +272,7 @@ wait_for_spa_deployment() {
 # the updated image tags from munchgo-k8s-config.
 # ---------------------------------------------------------------------------
 wait_for_pod_rollouts() {
-    log "Step 4: Waiting for pod rollouts..."
+    log "Step 3: Waiting for pod rollouts..."
 
     local SERVICES=(
         "auth-service"
@@ -311,10 +306,33 @@ wait_for_pod_rollouts() {
 }
 
 # ---------------------------------------------------------------------------
+# Trigger SPA deployment (after APIs are live)
+# ---------------------------------------------------------------------------
+# The SPA CI workflow deploys to S3/CloudFront and then runs Playwright E2E
+# tests against the live deployment. E2E tests call the backend APIs, so the
+# microservices must be deployed and healthy BEFORE triggering SPA deploy.
+# ---------------------------------------------------------------------------
+trigger_spa_deployment() {
+    log "Step 5: Triggering SPA deployment..."
+
+    local SPA_REPO="shanaka-versent/munchgo-spa"
+
+    # Record trigger time for SPA wait
+    SPA_TRIGGER_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    if gh workflow run deploy.yml -R "$SPA_REPO" --ref main 2>/dev/null; then
+        info "  Triggered: munchgo-spa deploy.yml"
+    else
+        warn "  Failed to trigger SPA deploy — ensure deploy.yml has workflow_dispatch trigger"
+        warn "  Fallback: cd munchgo-spa && git commit --allow-empty -m 'trigger deploy' && git push"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Seed admin user
 # ---------------------------------------------------------------------------
 seed_admin_user() {
-    log "Step 5: Seeding admin user..."
+    log "Step 4: Seeding admin user..."
 
     local SEED_SCRIPT="${SCRIPT_DIR}/seed-admin-user.sh"
     if [[ -f "$SEED_SCRIPT" ]]; then
@@ -333,7 +351,7 @@ seed_demo_data() {
         return
     fi
 
-    log "Step 6: Seeding demo data..."
+    log "Step 4b: Seeding demo data..."
 
     local SEED_SCRIPT="${SCRIPT_DIR}/seed-demo-data.sh"
     if [[ -f "$SEED_SCRIPT" ]]; then
@@ -347,7 +365,7 @@ seed_demo_data() {
 # Smoke tests — verify all service health endpoints via CloudFront
 # ---------------------------------------------------------------------------
 run_smoke_tests() {
-    log "Step 7: Running smoke tests..."
+    log "Step 7: Running API smoke tests..."
 
     if [[ -z "$APP_URL" ]]; then
         warn "APP_URL not available — skipping smoke tests"
@@ -432,13 +450,22 @@ main() {
     echo ""
 
     read_terraform_outputs
-    trigger_microservices_ci
-    wait_for_ci_completion
-    wait_for_spa_deployment
-    wait_for_pod_rollouts
-    seed_admin_user
-    seed_demo_data
-    run_smoke_tests
+
+    # Phase 1: Deploy APIs (microservices must be live before SPA E2E tests)
+    trigger_microservices_ci          # Step 1: Trigger 6 microservice CI builds
+    wait_for_ci_completion            # Step 2: Wait for CI to push images to ECR
+    wait_for_pod_rollouts             # Step 3: Wait for K8s rollouts (APIs live)
+
+    # Phase 2: Seed data (APIs must be live for seeding)
+    seed_admin_user                   # Step 4: Create admin in Cognito + DB
+    seed_demo_data                    # Step 4b: Seed restaurants + menus
+
+    # Phase 3: Deploy SPA + run E2E tests (APIs + seed data must exist)
+    trigger_spa_deployment            # Step 5: Trigger SPA build + deploy + E2E
+    wait_for_spa_deployment           # Step 6: Wait for SPA deploy + E2E to pass
+
+    # Phase 4: Final validation
+    run_smoke_tests                   # Step 7: Verify all endpoints via CloudFront
     show_summary
 }
 
