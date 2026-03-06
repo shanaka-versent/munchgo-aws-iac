@@ -45,24 +45,9 @@ _format_version: "3.0"
 
 plugins:
   # --------------------------------------------------------------------------
-  # Prometheus Metrics — Global (all services and routes)
+  # NOTE: Prometheus plugin is NOT available on Kong Dedicated Cloud Gateway.
+  # Kong manages the data plane — use Konnect Analytics for metrics instead.
   # --------------------------------------------------------------------------
-  # Exposes Prometheus metrics on the data plane status port (8100).
-  # Metrics are collected by the Konnect analytics exporter CronJob in EKS
-  # and pushed to Prometheus Pushgateway → scraped by Prometheus → Grafana.
-  #
-  # Metrics enabled:
-  #   - status_code_metrics: per-service/route HTTP status code counters
-  #   - latency_metrics:     request/upstream/Kong latency histograms
-  #   - bandwidth_metrics:   ingress/egress byte counters
-  #   - upstream_health_metrics: upstream target health status
-  - name: prometheus
-    config:
-      per_consumer: false
-      status_code_metrics: true
-      latency_metrics: true
-      bandwidth_metrics: true
-      upstream_health_metrics: true
 
   # --------------------------------------------------------------------------
   # CloudFront Bypass Prevention -- Custom Origin Header (Optional)
