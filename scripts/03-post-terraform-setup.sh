@@ -196,31 +196,38 @@ populate_kong_yaml() {
 }
 
 # ---------------------------------------------------------------------------
-# Populate ExternalSecret placeholders
+# Populate ExternalSecret secret names (idempotent — works on recreates too)
 # ---------------------------------------------------------------------------
 populate_external_secrets() {
-    log "Populating ExternalSecret placeholders..."
+    log "Populating ExternalSecret secret names..."
+
+    # Helper: replace the key: value on lines matching a pattern.
+    # Uses a regex that matches both PLACEHOLDER-* and any previous secret name
+    # (e.g. kong-gw-poc-munchgo-rds-2026030414...) so recreates work correctly.
+    replace_es_key() {
+        local file="$1" pattern="$2" new_value="$3"
+        sed -i.bak "s|key: .*${pattern}.*|key: ${new_value}|g" "$file"
+        rm -f "${file}.bak"
+    }
 
     # Cognito ExternalSecret
     local COGNITO_ES="${REPO_DIR}/k8s/external-secrets/munchgo-cognito-secret.yaml"
     if [[ -f "$COGNITO_ES" && -n "$COGNITO_SECRET_NAME" ]]; then
-        sed -i.bak "s|PLACEHOLDER-munchgo-cognito|${COGNITO_SECRET_NAME}|g" "$COGNITO_ES"
+        replace_es_key "$COGNITO_ES" "munchgo-cognito" "$COGNITO_SECRET_NAME"
         info "  Cognito secret: ${COGNITO_SECRET_NAME}"
-        rm -f "${COGNITO_ES}.bak"
     fi
 
     # DB ExternalSecrets
     local DB_ES="${REPO_DIR}/k8s/external-secrets/munchgo-db-secret.yaml"
     if [[ -f "$DB_ES" ]]; then
-        [[ -n "$RDS_MASTER_SECRET" ]] && sed -i.bak "s|PLACEHOLDER-munchgo-rds-master|${RDS_MASTER_SECRET}|g" "$DB_ES"
-        [[ -n "$RDS_AUTH_SECRET" ]] && sed -i.bak "s|PLACEHOLDER-munchgo-auth-db|${RDS_AUTH_SECRET}|g" "$DB_ES"
-        [[ -n "$RDS_CONSUMERS_SECRET" ]] && sed -i.bak "s|PLACEHOLDER-munchgo-consumers-db|${RDS_CONSUMERS_SECRET}|g" "$DB_ES"
-        [[ -n "$RDS_RESTAURANTS_SECRET" ]] && sed -i.bak "s|PLACEHOLDER-munchgo-restaurants-db|${RDS_RESTAURANTS_SECRET}|g" "$DB_ES"
-        [[ -n "$RDS_COURIERS_SECRET" ]] && sed -i.bak "s|PLACEHOLDER-munchgo-couriers-db|${RDS_COURIERS_SECRET}|g" "$DB_ES"
-        [[ -n "$RDS_ORDERS_SECRET" ]] && sed -i.bak "s|PLACEHOLDER-munchgo-orders-db|${RDS_ORDERS_SECRET}|g" "$DB_ES"
-        [[ -n "$RDS_SAGAS_SECRET" ]] && sed -i.bak "s|PLACEHOLDER-munchgo-sagas-db|${RDS_SAGAS_SECRET}|g" "$DB_ES"
+        [[ -n "$RDS_MASTER_SECRET" ]]      && replace_es_key "$DB_ES" "munchgo-rds"            "$RDS_MASTER_SECRET"
+        [[ -n "$RDS_AUTH_SECRET" ]]         && replace_es_key "$DB_ES" "munchgo-auth-db"        "$RDS_AUTH_SECRET"
+        [[ -n "$RDS_CONSUMERS_SECRET" ]]    && replace_es_key "$DB_ES" "munchgo-consumers-db"   "$RDS_CONSUMERS_SECRET"
+        [[ -n "$RDS_RESTAURANTS_SECRET" ]]  && replace_es_key "$DB_ES" "munchgo-restaurants-db" "$RDS_RESTAURANTS_SECRET"
+        [[ -n "$RDS_COURIERS_SECRET" ]]     && replace_es_key "$DB_ES" "munchgo-couriers-db"    "$RDS_COURIERS_SECRET"
+        [[ -n "$RDS_ORDERS_SECRET" ]]       && replace_es_key "$DB_ES" "munchgo-orders-db"      "$RDS_ORDERS_SECRET"
+        [[ -n "$RDS_SAGAS_SECRET" ]]        && replace_es_key "$DB_ES" "munchgo-sagas-db"       "$RDS_SAGAS_SECRET"
         info "  DB secrets populated"
-        rm -f "${DB_ES}.bak"
     fi
 }
 
@@ -231,7 +238,7 @@ populate_eso_irsa() {
     local ESO_APP="${REPO_DIR}/argocd/apps/09-external-secrets.yaml"
     if [[ -f "$ESO_APP" && -n "$EXTERNAL_SECRETS_ROLE_ARN" ]]; then
         log "Populating External Secrets IRSA role ARN..."
-        sed -i.bak "s|PLACEHOLDER_EXTERNAL_SECRETS_ROLE_ARN|${EXTERNAL_SECRETS_ROLE_ARN}|g" "$ESO_APP"
+        sed -i.bak "s|arn:aws:iam::[0-9]*:role/[^ ]*external-secrets[^ ]*|${EXTERNAL_SECRETS_ROLE_ARN}|g; s|PLACEHOLDER_EXTERNAL_SECRETS_ROLE_ARN|${EXTERNAL_SECRETS_ROLE_ARN}|g" "$ESO_APP"
         info "  ESO IRSA → ${EXTERNAL_SECRETS_ROLE_ARN}"
         rm -f "${ESO_APP}.bak"
     fi
