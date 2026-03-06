@@ -300,6 +300,11 @@ create_service_databases() {
     local ELAPSED=0
 
     if ! kubectl get secret munchgo-db-master -n munchgo &>/dev/null; then
+        # Force ArgoCD to sync ExternalSecrets config so ESO picks up the new secret names
+        log "Triggering ArgoCD refresh for external-secrets-config..."
+        kubectl annotate application external-secrets-config -n argocd \
+            argocd.argoproj.io/refresh=hard --overwrite 2>/dev/null || true
+
         log "Waiting for munchgo-db-master secret (ExternalSecrets sync)..."
         while [[ $ELAPSED -lt $MAX_WAIT ]]; do
             if kubectl get secret munchgo-db-master -n munchgo &>/dev/null; then
