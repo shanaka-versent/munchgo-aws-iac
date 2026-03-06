@@ -816,6 +816,31 @@ show_next_steps() {
 }
 
 # ---------------------------------------------------------------------------
+# Update kubeconfig to point to the current EKS cluster
+# ---------------------------------------------------------------------------
+update_kubeconfig() {
+    log "Updating kubeconfig for EKS cluster..."
+
+    cd "$TERRAFORM_DIR"
+    local CLUSTER_NAME
+    CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "")
+    local REGION
+    local CLUSTER_ENDPOINT
+    CLUSTER_ENDPOINT=$(terraform output -raw cluster_endpoint 2>/dev/null || echo "")
+    REGION=$(echo "$CLUSTER_ENDPOINT" | sed -n 's/.*\.\([a-z0-9-]*\)\.eks\.amazonaws\.com/\1/p')
+    REGION="${REGION:-ap-southeast-2}"
+    cd "$REPO_DIR"
+
+    if [[ -z "$CLUSTER_NAME" ]]; then
+        warn "Could not read cluster_name from Terraform outputs — skipping kubeconfig update"
+        return
+    fi
+
+    aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION"
+    log "kubeconfig updated for cluster: $CLUSTER_NAME ($REGION)"
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -827,6 +852,7 @@ main() {
     echo ""
 
     read_terraform_outputs
+    update_kubeconfig
     discover_kong_proxy_domain
     create_argocd_repo_credentials
     verify_vpc_routes
