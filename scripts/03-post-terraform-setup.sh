@@ -812,6 +812,14 @@ update_github_variables() {
     log "Updating GitHub repository variables..."
 
     local SPA_REPO="shanaka-versent/munchgo-spa"
+    local MICRO_REPO="shanaka-versent/munchgo-microservices"
+
+    # Set STACK_STATUS=ACTIVE so CI pipelines know the stack is live
+    for repo in "$SPA_REPO" "$MICRO_REPO"; do
+        gh variable set STACK_STATUS --body "ACTIVE" -R "$repo" 2>/dev/null && \
+            info "  ${repo}: STACK_STATUS → ACTIVE" || \
+            warn "  Failed to set STACK_STATUS in $repo"
+    done
 
     # CloudFront URL (variable — SPA E2E tests read from vars.CLOUDFRONT_URL)
     if [[ -n "$APP_URL" ]]; then

@@ -675,6 +675,36 @@ cleanup_stale_env_values() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 11: Set STACK_STATUS=DESTROYED in GitHub repos
+# ---------------------------------------------------------------------------
+# Sets a GitHub Actions variable so CI pipelines fail fast with a clear
+# error instead of cryptic AWS failures when the stack doesn't exist.
+# The setup script (03-post-terraform-setup.sh) resets this to ACTIVE.
+# ---------------------------------------------------------------------------
+set_stack_status_destroyed() {
+    log "Step 11: Setting STACK_STATUS=DESTROYED in GitHub repos..."
+
+    if ! command -v gh &>/dev/null || ! gh auth status &>/dev/null 2>&1; then
+        warn "gh CLI not available or not authenticated — skipping STACK_STATUS update"
+        warn "Manually set STACK_STATUS=DESTROYED in GitHub repo variables"
+        return
+    fi
+
+    local REPOS=(
+        "shanaka-versent/munchgo-spa"
+        "shanaka-versent/munchgo-microservices"
+    )
+
+    for repo in "${REPOS[@]}"; do
+        if gh variable set STACK_STATUS --body "DESTROYED" -R "$repo" 2>/dev/null; then
+            info "  ${repo}: STACK_STATUS → DESTROYED"
+        else
+            warn "  Failed to set STACK_STATUS in ${repo}"
+        fi
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -721,6 +751,7 @@ main() {
     # Post-destroy cleanup
     reset_deployment_placeholders
     cleanup_stale_env_values
+    set_stack_status_destroyed
 
     echo ""
     log "Full stack teardown complete (EKS + CloudFront + WAF + Konnect)."
