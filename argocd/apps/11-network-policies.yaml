@@ -20,7 +20,7 @@
 #                   observability (Prometheus), kubelet probes, VPC data services,
 #                   and external HTTPS (Cognito JWKS)
 #   istio-ingress — Default deny all + allow from Kong Cloud Gateway CIDR (192.168.0.0/16)
-#                   and VPC (NLB health checks), egress to munchgo + gateway-health
+#                   and VPC (NLB health checks), egress to munchgo + gateway-health + istiod
 #
 # Prerequisite: VPC CNI addon must be configured with enableNetworkPolicy=true
 # (terraform/modules/eks/addons.tf). Without it, these objects are stored but

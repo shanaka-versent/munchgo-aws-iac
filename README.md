@@ -266,6 +266,7 @@ Packet from unauthorized source
 | `allow-ingress-from-observability` | Ingress | Prometheus can scrape `/actuator/prometheus` |
 | `allow-kubelet-probes` | Ingress | Kubelet health checks from VPC node IPs (`10.0.0.0/16`) |
 | `allow-egress-intra-namespace` | Egress | Pods within `munchgo` can call each other |
+| `allow-egress-istiod` | Egress | Waypoint proxy → istiod (`:15012` CA/xDS, `:15014` metrics) |
 | `allow-egress-dns` | Egress | CoreDNS port 53 for service discovery |
 | `allow-egress-aws-data-services` | Egress | MSK Kafka (`:9094`) and RDS PostgreSQL (`:5432`) within VPC |
 | `allow-egress-external-https` | Egress | Public HTTPS (`:443`) only — for Cognito JWKS auto-discovery |
@@ -275,9 +276,9 @@ Packet from unauthorized source
 | Policy | Direction | What it allows |
 |--------|-----------|----------------|
 | `default-deny-ingress` | Ingress | Blocks all except Kong and VPC health checks |
-| `default-deny-egress` | Egress | Blocks all except munchgo, gateway-health, and DNS |
+| `default-deny-egress` | Egress | Blocks all except munchgo, gateway-health, istiod, and DNS |
 | `allow-ingress-from-kong` | Ingress | Kong Cloud Gateway CIDR `192.168.0.0/16` + VPC `10.0.0.0/16` (NLB health checks) |
-| `allow-egress-to-backends` | Egress | `munchgo` and `gateway-health` namespaces + DNS |
+| `allow-egress-to-backends` | Egress | `munchgo`, `gateway-health`, `istio-system` (`:15012` CA/xDS, `:15014` metrics) + DNS |
 
 #### Deployment & Verification
 
@@ -763,17 +764,31 @@ After-response scripts automatically chain IDs between requests.
 
 ### Automated Post-Deployment Testing
 
-The Insomnia collection runs automatically via GitHub Actions ([`.github/workflows/post-deployment-tests.yml`](.github/workflows/post-deployment-tests.yml)) after every deployment — no manual trigger needed.
+Automated API smoke tests run via GitHub Actions ([`.github/workflows/post-deployment-tests.yml`](.github/workflows/post-deployment-tests.yml)) after every deployment — no manual trigger needed.
 
 | Trigger | When | What happens |
 |---------|------|--------------|
-| Push to `deck/kong.yaml` on `main` | Kong API config change | Syncs Kong via `deck gateway sync` **then** runs tests |
-| `repository_dispatch: microservice-deployed` | Microservice CI confirms deploy | Polls `/healthz` until healthy, then runs full test suite |
+| Push to `deck/kong.yaml` on `main` | Kong API config change | Syncs Kong via `deck gateway sync` **then** runs smoke tests |
+| `repository_dispatch: microservice-deployed` | Microservice CI confirms deploy | Polls `/healthz` until healthy, then runs smoke tests |
 | `workflow_dispatch` | Manual run | Optional URL override, tests run immediately |
 
-**How it stays current:** `scripts/03-post-terraform-setup.sh` automatically writes the CloudFront URL from `terraform output application_url` into `insomnia/munchgo-api.json` on every new environment provision. No secrets or variables to update manually.
+**CI smoke tests** use `curl` (zero dependencies — no Node.js, no external CLI tools). Each endpoint is tested against its expected HTTP status:
 
-**Microservices already wired up:** A `trigger-api-tests` job is wired into all 6 microservice workflows using the existing `GITOPS_TOKEN`. After the GitOps image tag is committed, it sends a `repository_dispatch` event that wakes the `post-deployment-tests.yml` workflow, which polls `/healthz` until ArgoCD finishes the rolling deploy (~3-5 min), then runs the full test suite.
+```
+Health check          → GET  /healthz               → 200
+Auth endpoint         → POST /api/v1/auth/login      → 400 (missing body)
+Restaurants (public)  → GET  /api/v1/restaurants      → 200 (anonymous ok)
+Consumers (auth)      → GET  /api/v1/consumers        → 401 (OIDC required)
+Orders (auth)         → GET  /api/v1/orders            → 401
+Couriers (auth)       → GET  /api/v1/couriers          → 401
+Sagas (auth)          → GET  /api/v1/sagas/test        → 401
+```
+
+**Kong decK sync** tolerates Konnect-managed SNI deletion errors (immutable entities auto-created by Kong for cloud gateway data planes). The sync step filters these and emits a GitHub Actions `::warning::` annotation instead of failing.
+
+**How it stays current:** `scripts/03-post-terraform-setup.sh` automatically writes the CloudFront URL from `terraform output application_url` into `insomnia/munchgo-api.json` on every new environment provision. The CI workflow reads the `base_url` from this file.
+
+**Microservices already wired up:** A `trigger-api-tests` job is wired into all 6 microservice workflows using the existing `GITOPS_TOKEN`. After the GitOps image tag is committed (idempotent — skips commit if tags already match), it sends a `repository_dispatch` event that wakes the `post-deployment-tests.yml` workflow, which polls `/healthz` until ArgoCD finishes the rolling deploy (~3-5 min), then runs the smoke tests.
 
 ---
 
@@ -1071,11 +1086,32 @@ gh secret set SPA_BUCKET_NAME --body "$(terraform -chdir=terraform output -raw s
 gh secret set CLOUDFRONT_DISTRIBUTION_ID --body "$(terraform -chdir=terraform output -raw cloudfront_distribution_id)" -R shanaka-versent/munchgo-spa
 ```
 
-### Microservice CI fails with "nothing to commit"
+### Microservice CI — "nothing to commit" (resolved)
 
-**Symptom:** GitHub Actions workflow shows failure at the "Update GitOps" step with `nothing to commit, working tree clean`.
+The GitOps update step in all microservice workflows uses `git diff --quiet` to skip commits when image tags already match (same commit re-built). This is a no-op, not an error.
 
-**Cause:** Benign — the image tags in `munchgo-k8s-config` already match the built images. This happens when the same commit is re-built. Images are already deployed correctly.
+### Istio Gateway returning 503 "no_healthy_upstream"
+
+**Symptom:** All endpoints return 503 via the NLB. Gateway proxy logs show:
+```
+failed to sign CSR: create certificate: rpc error: dial tcp 172.20.x.x:15012: i/o timeout
+```
+
+**Cause:** Kubernetes NetworkPolicy `default-deny-egress` in `istio-ingress` (and/or `munchgo`) blocks egress to `istio-system`. The Istio gateway proxy and waypoint proxy cannot reach istiod for mTLS certificate signing and xDS config discovery. Without valid certificates, the proxy reports `no_healthy_upstream` for all backends.
+
+**Fix:** The `allow-egress-to-backends` policy (istio-ingress) and `allow-egress-istiod` policy (munchgo) now include `istio-system` on ports 15012/15014. This is baked into `k8s/network-policies/network-policies.yaml` and deployed automatically by ArgoCD.
+
+**Verify:**
+```bash
+# Check gateway proxy can reach istiod
+kubectl logs -n istio-ingress -l gateway.networking.k8s.io/gateway-name=kong-cloud-gw-gateway --tail=5
+# Should show: "connected to delta upstream XDS server: istiod.istio-system.svc:15012"
+# Should show: "generated new workload certificate"
+
+# If still failing, restart the proxy to re-establish connection
+kubectl rollout restart deployment -n istio-ingress
+kubectl rollout restart deployment munchgo-waypoint -n munchgo
+```
 
 ### VPC route `192.168.0.0/16` missing or blackhole
 
@@ -1115,8 +1151,15 @@ kubectl get httproute -A              # Should show routes in munchgo namespace
 # 4. Pods running
 kubectl get pods -n munchgo           # All should be 1/1 Running
 
-# 5. TGW routes active
+# 5. Istio gateway proxy connected to istiod (check for certificate errors)
+kubectl logs -n istio-ingress -l gateway.networking.k8s.io/gateway-name=kong-cloud-gw-gateway --tail=10 | grep -E "error|connected|certificate"
+
+# 6. TGW routes active
 aws ec2 search-transit-gateway-routes --transit-gateway-route-table-id $(aws ec2 describe-transit-gateway-route-tables --query 'TransitGatewayRouteTables[0].TransitGatewayRouteTableId' --output text) --filters "Name=type,Values=static,propagated" --query 'Routes[*].[DestinationCidrBlock,State]' --output table
+
+# 7. Network policies allow istiod egress
+kubectl get networkpolicy -n istio-ingress allow-egress-to-backends -o yaml | grep istio-system
+kubectl get networkpolicy -n munchgo allow-egress-istiod -o yaml | grep istio-system
 ```
 
 ---
