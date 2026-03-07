@@ -392,7 +392,7 @@ sync_kong_config() {
     if [[ -z "${KONNECT_TOKEN:-}" ]]; then
         warn "KONNECT_TOKEN not set — skipping Kong sync"
         warn "Set KONNECT_TOKEN in .env and re-run, or sync manually:"
-        warn "  deck gateway sync deck/kong.yaml --konnect-addr \${KONNECT_REGIONAL_API} --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name \$KONNECT_CONTROL_PLANE_NAME --select-tag munchgo-managed"
+        warn "  deck gateway sync deck/kong.yaml --konnect-addr \${KONNECT_REGIONAL_API} --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name \$KONNECT_CONTROL_PLANE_NAME"
         return
     fi
 
@@ -402,12 +402,11 @@ sync_kong_config() {
     if deck gateway sync "$KONG_FILE" \
         --konnect-addr "${KONNECT_REGIONAL_API}" \
         --konnect-token "$KONNECT_TOKEN" \
-        --konnect-control-plane-name "$CP_NAME" \
-        --select-tag munchgo-managed; then
+        --konnect-control-plane-name "$CP_NAME"; then
         info "  Kong routes synced successfully"
     else
         error "  Kong sync failed — check deck output above"
-        warn "  Retry manually: deck gateway sync deck/kong.yaml --konnect-addr ${KONNECT_REGIONAL_API} --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name ${CP_NAME} --select-tag munchgo-managed"
+        warn "  Retry manually: deck gateway sync deck/kong.yaml --konnect-addr ${KONNECT_REGIONAL_API} --konnect-token \$KONNECT_TOKEN --konnect-control-plane-name ${CP_NAME}"
     fi
 }
 
