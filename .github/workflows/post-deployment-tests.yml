@@ -68,6 +68,13 @@ jobs:
           KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
           KONNECT_REGION: ${{ vars.KONNECT_REGION || 'au' }}
         run: |
+          # Skip sync if kong.yaml still has deployment placeholders (pre-setup state).
+          # Placeholders are replaced by 03-post-terraform-setup.sh during deployment.
+          if grep -q 'PLACEHOLDER_NLB_DNS\|PLACEHOLDER_COGNITO_ISSUER_URL' deck/kong.yaml; then
+            echo "::warning::kong.yaml contains deployment placeholders — skipping sync (run 03-post-terraform-setup.sh first)"
+            exit 0
+          fi
+
           # Sync our config. Konnect-managed SNIs (tagged konnect-managed) may
           # cause immutable-entity delete errors — these are safe to ignore
           # because we don't manage SNIs; Konnect auto-creates them for the
