@@ -255,18 +255,22 @@ populate_k8s_overlay() {
 
     log "Populating munchgo-k8s-config overlays..."
 
-    # Replace ACCOUNT_ID placeholder with actual AWS account ID in all dev overlays
+    # Replace ACCOUNT_ID placeholder OR any previous account ID with the current one.
+    # On first setup: overlays have literal "ACCOUNT_ID" placeholder.
+    # On rebuild: overlays may have the previous account ID (e.g. 675177357191).
+    # This sed handles both cases by matching either pattern in ECR image URLs.
     if [[ -n "$AWS_ACCOUNT_ID" ]]; then
         find "${K8S_CONFIG_REPO}/overlays/dev" -name 'kustomization.yaml' -exec \
-            sed -i.bak "s|ACCOUNT_ID|${AWS_ACCOUNT_ID}|g" {} +
+            sed -i.bak -E "s|[0-9]{12}\.dkr\.ecr|${AWS_ACCOUNT_ID}.dkr.ecr|g; s|ACCOUNT_ID\.dkr\.ecr|${AWS_ACCOUNT_ID}.dkr.ecr|g" {} +
         find "${K8S_CONFIG_REPO}/overlays/dev" -name '*.bak' -delete
         info "  ECR account ID → ${AWS_ACCOUNT_ID}"
     fi
 
-    # Replace Cognito IRSA role ARN in auth-service overlay
+    # Replace Cognito IRSA role ARN in auth-service overlay.
+    # Handles both COGNITO_AUTH_SERVICE_ROLE_ARN placeholder and any previous ARN.
     local AUTH_OVERLAY="${K8S_CONFIG_REPO}/overlays/dev/auth-service/kustomization.yaml"
     if [[ -f "$AUTH_OVERLAY" && -n "$COGNITO_AUTH_ROLE_ARN" ]]; then
-        sed -i.bak "s|COGNITO_AUTH_SERVICE_ROLE_ARN|${COGNITO_AUTH_ROLE_ARN}|g" "$AUTH_OVERLAY"
+        sed -i.bak -E "s|arn:aws:iam::[0-9]+:role/[^ ]*cognito[^ ]*|${COGNITO_AUTH_ROLE_ARN}|g; s|COGNITO_AUTH_SERVICE_ROLE_ARN|${COGNITO_AUTH_ROLE_ARN}|g" "$AUTH_OVERLAY"
         info "  auth-service IRSA → ${COGNITO_AUTH_ROLE_ARN}"
         rm -f "${AUTH_OVERLAY}.bak"
     fi
@@ -484,6 +488,14 @@ update_spa_e2e_config() {
         info "  playwright.config.ts → https://${CF_DOMAIN}"
     fi
 
+    # Update playwright.video.config.ts default baseURL
+    local PW_VIDEO_CONFIG="${SPA_REPO}/e2e/playwright.video.config.ts"
+    if [[ -f "$PW_VIDEO_CONFIG" ]]; then
+        sed -i.bak "s|https://[a-z0-9]*\.cloudfront\.net|https://${CF_DOMAIN}|g" "$PW_VIDEO_CONFIG"
+        rm -f "${PW_VIDEO_CONFIG}.bak"
+        info "  playwright.video.config.ts → https://${CF_DOMAIN}"
+    fi
+
     # Update deploy.yml CI fallback URLs
     local DEPLOY_YML="${SPA_REPO}/.github/workflows/deploy.yml"
     if [[ -f "$DEPLOY_YML" ]]; then
@@ -494,8 +506,8 @@ update_spa_e2e_config() {
 
     # Commit and push changes in munchgo-spa repo
     cd "$SPA_REPO"
-    if ! git diff --quiet HEAD -- e2e/playwright.config.ts .github/workflows/deploy.yml 2>/dev/null; then
-        git add e2e/playwright.config.ts .github/workflows/deploy.yml 2>/dev/null || true
+    if ! git diff --quiet HEAD -- e2e/playwright.config.ts e2e/playwright.video.config.ts .github/workflows/deploy.yml 2>/dev/null; then
+        git add e2e/playwright.config.ts e2e/playwright.video.config.ts .github/workflows/deploy.yml 2>/dev/null || true
         git commit -m "Update CloudFront URL to ${CF_DOMAIN} (post-terraform-setup)" 2>/dev/null || true
         git push 2>/dev/null || warn "Could not push munchgo-spa changes — push manually"
         info "  munchgo-spa changes committed and pushed"
@@ -820,6 +832,31 @@ update_github_variables() {
             info "  ${repo}: STACK_STATUS → ACTIVE" || \
             warn "  Failed to set STACK_STATUS in $repo"
     done
+
+    # Admin credentials for E2E tests (must match seed-admin-user.sh defaults)
+    gh secret set ADMIN_EMAIL --body "admin@munchgo.com" -R "$SPA_REPO" 2>/dev/null && \
+        info "  ${SPA_REPO}: ADMIN_EMAIL → admin@munchgo.com" || \
+        warn "  Failed to set ADMIN_EMAIL in $SPA_REPO"
+    gh secret set ADMIN_PASSWORD --body "Admin@123" -R "$SPA_REPO" 2>/dev/null && \
+        info "  ${SPA_REPO}: ADMIN_PASSWORD → (set)" || \
+        warn "  Failed to set ADMIN_PASSWORD in $SPA_REPO"
+
+    # Microservices CI secrets (ECR sync needs account ID, region, and OIDC role)
+    if [[ -n "$AWS_ACCOUNT_ID" ]]; then
+        gh secret set AWS_ACCOUNT_ID --body "$AWS_ACCOUNT_ID" -R "$MICRO_REPO" 2>/dev/null && \
+            info "  ${MICRO_REPO}: AWS_ACCOUNT_ID → ${AWS_ACCOUNT_ID}" || \
+            warn "  Failed to set AWS_ACCOUNT_ID in $MICRO_REPO"
+    fi
+    gh secret set AWS_REGION --body "${AWS_REGION:-ap-southeast-2}" -R "$MICRO_REPO" 2>/dev/null && \
+        info "  ${MICRO_REPO}: AWS_REGION → ${AWS_REGION:-ap-southeast-2}" || \
+        warn "  Failed to set AWS_REGION in $MICRO_REPO"
+
+    # Microservices use the same OIDC role as SPA (spa_deploy_role covers both repos)
+    if [[ -n "$SPA_ROLE_ARN" ]]; then
+        gh secret set AWS_ROLE_ARN --body "$SPA_ROLE_ARN" -R "$MICRO_REPO" 2>/dev/null && \
+            info "  ${MICRO_REPO}: AWS_ROLE_ARN → ${SPA_ROLE_ARN}" || \
+            warn "  Failed to set AWS_ROLE_ARN in $MICRO_REPO"
+    fi
 
     # CloudFront URL (variable — SPA E2E tests read from vars.CLOUDFRONT_URL)
     if [[ -n "$APP_URL" ]]; then
