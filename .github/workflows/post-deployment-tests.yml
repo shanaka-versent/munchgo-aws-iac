@@ -68,11 +68,24 @@ jobs:
           KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
           KONNECT_REGION: ${{ vars.KONNECT_REGION || 'au' }}
         run: |
-          deck gateway sync deck/kong.yaml \
+          # Sync our config. Konnect-managed SNIs (tagged konnect-managed) may
+          # cause immutable-entity delete errors — these are safe to ignore
+          # because we don't manage SNIs; Konnect auto-creates them for the
+          # cloud gateway data plane.
+          OUTPUT=$(deck gateway sync deck/kong.yaml \
             --konnect-addr "https://${KONNECT_REGION}.api.konghq.com" \
             --konnect-token "$KONNECT_TOKEN" \
-            --konnect-control-plane-name MunchGo \
-            --select-tag munchgo-managed
+            --konnect-control-plane-name MunchGo 2>&1) || {
+            # Check if ALL errors are just konnect-managed immutable SNIs
+            if echo "$OUTPUT" | grep -q "konnect-managed.*immutable" && \
+               ! echo "$OUTPUT" | grep -v "konnect-managed.*immutable" | grep -q "Error"; then
+              echo "::warning::decK reported konnect-managed SNI delete errors (safe to ignore)"
+              echo "$OUTPUT"
+            else
+              echo "$OUTPUT"
+              exit 1
+            fi
+          }
 
   # ---------------------------------------------------------------------------
   # Job 2: Run API integration tests (always runs, after kong-sync if applicable)
