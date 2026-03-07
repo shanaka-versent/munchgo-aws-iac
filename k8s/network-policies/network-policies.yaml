@@ -138,6 +138,33 @@ spec:
               kubernetes.io/metadata.name: munchgo
 
 ---
+# Allow egress to istiod (istio-system) for Istio Ambient Mesh waypoint proxy
+# The waypoint proxy needs to reach istiod for:
+#   - Certificate signing (port 15012) — mTLS workload certificates via Citadel
+#   - xDS config stream (port 15012) — L7 policy discovery from istiod
+# Note: ztunnel (DaemonSet in istio-system) is not affected by munchgo policies,
+# but the waypoint proxy runs as a regular pod in munchgo namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-istiod
+  namespace: munchgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012  # istiod xDS and CA (certificate signing)
+        - protocol: TCP
+          port: 15014  # istiod metrics (optional, for debugging)
+
+---
 # Allow egress to kube-dns (CoreDNS in kube-system) for service discovery
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -260,8 +287,13 @@ spec:
     - Egress
 
 ---
-# Allow egress from Istio Gateway to munchgo services and gateway-health namespace
+# Allow egress from Istio Gateway to munchgo services, gateway-health, and istio-system
 # This is the L3 path for: Istio Gateway → munchgo pods (HTTPRoute forwarding)
+# Istio Gateway proxy also needs egress to istiod (istio-system) for:
+#   - Certificate signing (port 15012) — mTLS workload certificates via Citadel
+#   - xDS config stream (port 15012) — route/cluster/listener discovery from istiod
+# Without this, the gateway proxy cannot obtain mTLS certificates and reports
+# "no_healthy_upstream" for all backends.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -280,6 +312,15 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: gateway-health
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012  # istiod xDS and CA (certificate signing)
+        - protocol: TCP
+          port: 15014  # istiod metrics (optional, for debugging)
     - to:
         - namespaceSelector:
             matchLabels:
