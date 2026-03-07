@@ -71,7 +71,8 @@ jobs:
           deck gateway sync deck/kong.yaml \
             --konnect-addr "https://${KONNECT_REGION}.api.konghq.com" \
             --konnect-token "$KONNECT_TOKEN" \
-            --konnect-control-plane-name MunchGo
+            --konnect-control-plane-name MunchGo \
+            --select-tag munchgo-managed
 
   # ---------------------------------------------------------------------------
   # Job 2: Run API integration tests (always runs, after kong-sync if applicable)
