@@ -76,9 +76,9 @@ jobs:
             --konnect-addr "https://${KONNECT_REGION}.api.konghq.com" \
             --konnect-token "$KONNECT_TOKEN" \
             --konnect-control-plane-name MunchGo 2>&1) || {
-            # Check if ALL errors are just konnect-managed immutable SNIs
-            if echo "$OUTPUT" | grep -q "konnect-managed.*immutable" && \
-               ! echo "$OUTPUT" | grep -v "konnect-managed.*immutable" | grep -q "Error"; then
+            # Check if the only "processing event" failures are konnect-managed SNIs
+            NON_SNI_ERRORS=$(echo "$OUTPUT" | grep "while processing event" | grep -v "konnect-managed.*immutable" || true)
+            if [ -z "$NON_SNI_ERRORS" ] && echo "$OUTPUT" | grep -q "konnect-managed.*immutable"; then
               echo "::warning::decK reported konnect-managed SNI delete errors (safe to ignore)"
               echo "$OUTPUT"
             else
