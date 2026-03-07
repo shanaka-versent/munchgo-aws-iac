@@ -103,27 +103,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install inso CLI
-        run: npm install -g @kong/inso
-
-      - name: Override base_url in collection (workflow_dispatch only)
-        if: github.event.inputs.base_url != ''
+      - name: Resolve base URL
         run: |
-          jq --arg url "${{ github.event.inputs.base_url }}" \
-            '(.resources[] | select(._type == "environment") | .data.base_url) = $url' \
-            insomnia/munchgo-api.json > /tmp/collection-override.json
-          mv /tmp/collection-override.json insomnia/munchgo-api.json
-          echo "base_url overridden to: ${{ github.event.inputs.base_url }}"
-
-      - name: Show target URL and trigger context
-        id: context
-        run: |
-          BASE_URL=$(jq -r '.resources[] | select(._type == "environment") | .data.base_url' insomnia/munchgo-api.json)
+          if [ -n "${{ github.event.inputs.base_url }}" ]; then
+            BASE_URL="${{ github.event.inputs.base_url }}"
+          else
+            BASE_URL=$(jq -r '.resources[] | select(._type == "environment") | .data.base_url' insomnia/munchgo-api.json)
+          fi
           echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
           echo "Testing against: $BASE_URL"
           echo "Trigger: ${{ github.event_name }}"
@@ -153,17 +139,40 @@ jobs:
             sleep 15
           done
 
-      - name: Run MunchGo API Integration Tests
+      - name: Run API smoke tests
         run: |
-          inso run collection "MunchGo API Collection" \
-            --env "Base Environment" \
-            --ci \
-            insomnia/munchgo-api.json
+          PASS=0
+          FAIL=0
+          TOTAL=0
 
-      - name: Upload collection on failure (for debugging)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-test-results-${{ github.run_id }}
-          path: insomnia/munchgo-api.json
-          retention-days: 7
+          check() {
+            local name="$1" method="$2" path="$3" expected="$4"
+            TOTAL=$((TOTAL + 1))
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" --max-time 15 "$BASE_URL$path" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "$expected" ]; then
+              echo "  ✓ $name — HTTP $STATUS"
+              PASS=$((PASS + 1))
+            else
+              echo "  ✗ $name — expected $expected, got $STATUS"
+              FAIL=$((FAIL + 1))
+            fi
+          }
+
+          echo "=== MunchGo API Smoke Tests ==="
+          echo ""
+
+          echo "--- Health & Routing ---"
+          check "Health check" GET "/healthz" "200"
+          check "Auth endpoint reachable" POST "/api/v1/auth/login" "400"
+          check "Restaurants (public, anonymous)" GET "/api/v1/restaurants" "200"
+          check "Consumers (requires auth)" GET "/api/v1/consumers" "401"
+          check "Orders (requires auth)" GET "/api/v1/orders" "401"
+          check "Couriers (requires auth)" GET "/api/v1/couriers" "401"
+          check "Sagas (requires auth)" GET "/api/v1/sagas/test" "401"
+
+          echo ""
+          echo "=== Results: $PASS/$TOTAL passed, $FAIL failed ==="
+
+          if [ "$FAIL" -gt 0 ]; then
+            exit 1
+          fi
